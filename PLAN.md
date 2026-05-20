@@ -1,0 +1,177 @@
+# voice-dictate — Implementation Plan
+
+Order of operations to ship v0.1 per [SPEC.md][spec]. Each step has explicit acceptance criteria. Don't move to step N+1 until step N passes.
+
+---
+
+## Step 0 — Verify host environment
+
+Already done during spec phase. Recorded here for reproducibility.
+
+| Check | Status |
+|-------|--------|
+| `whisper-cli` on `$PATH` | ✅ `/opt/homebrew/bin/whisper-cli` |
+| `ffmpeg` on `$PATH` | ✅ |
+| Hammerspoon installed | ✅ (`/Applications/Hammerspoon.app`) |
+| Whisper model present | ✅ `~/whisper-models/ggml-small-q5_1.bin` |
+| Microphone available | Verified at first run via TCC prompt. |
+
+---
+
+## Step 1 — `bin/dictate.sh`
+
+The shell-side entry point. Three subcommands:
+
+```
+dictate.sh record <wav-path>       # spawns ffmpeg, blocks until SIGINT
+dictate.sh transcribe <wav-path>   # runs whisper-cli, prints transcript to stdout
+dictate.sh smoke                   # transcribe a known fixture, assert non-empty
+```
+
+**Implementation notes:**
+
+- `set -euo pipefail`. Strict mode is mandatory.
+- All tunables (`MODEL_PATH`, `LANGUAGE`, `THREADS`, `AUDIO_DEVICE`) declared as readonly constants at top with single-line `# description` comments — POSIX shell analog of the Arrivance "module-level const carries inline JSDoc" rule.
+- `record`: invokes `ffmpeg -hide_banner -loglevel error -f avfoundation -i "$AUDIO_DEVICE" -ar 16000 -ac 1 -acodec pcm_s16le "$wav"`. Traps `SIGINT` to exit 0 cleanly.
+- `transcribe`: invokes `whisper-cli -m "$MODEL_PATH" -f "$wav" -l "$LANGUAGE" -t "$THREADS" -nt -of - 2>/dev/null` — `-of -` writes to stdout. Falls back to `-otxt -of <tmpfile>` + cat if `-of -` doesn't behave as expected.
+- `smoke`: transcribes a known short Greek WAV; asserts stdout non-empty. Use the bundled `for-tests-ggml-tiny.bin` test fixture only if available; otherwise skip with a clear message.
+
+**File size cap reminder:** target ≤120 lines. Each subcommand is its own function.
+
+**Acceptance:**
+
+- `./bin/dictate.sh record /tmp/test.wav` → records until Ctrl+C, produces a valid WAV (`file /tmp/test.wav` says `RIFF (little-endian) data, WAVE audio, …`).
+- `./bin/dictate.sh transcribe /tmp/test.wav` → prints Greek transcript to stdout, no other text.
+- `shellcheck bin/dictate.sh` clean.
+
+---
+
+## Step 2 — `hammerspoon/voice-dictate.lua`
+
+The Hammerspoon module. Exports `start()` and `stop()` for use from the user's `~/.hammerspoon/init.lua`.
+
+**Public surface:**
+
+```lua
+local m = require("voice-dictate")
+m.start()  -- bind hotkeys, set up menubar
+m.stop()   -- unbind, clean up (for reloads)
+```
+
+**Internal structure:**
+
+- Module-scoped state: `recording`, `currentPid`, `currentWav`, `menubar`, `hotkeyPTT`, `hotkeyToggle`.
+- Named functions (each gets a one-line comment per Arrivance JSDoc analog):
+  - `startRecording()` — generate WAV path, spawn `dictate.sh record`, store PID, update menubar, play start sound.
+  - `stopRecording()` — `kill -INT $pid`, wait briefly, call `transcribeAndPaste()`.
+  - `transcribeAndPaste()` — synchronous `hs.execute` of `dictate.sh transcribe`, set pasteboard, fire `Cmd+V`, play stop sound. On non-zero exit, notify.
+  - `setMenubarRecording(bool)` — toggles the menubar title between `● REC` and empty.
+  - `bindHotkeys()` / `unbindHotkeys()` — wires PTT (modifier flag watcher) and toggle (`hs.hotkey.bind`).
+- PTT uses `hs.eventtap.new({hs.eventtap.event.types.flagsChanged}, …)` because Right Option is a modifier, not a regular key — `hs.hotkey.bind` won't catch it.
+
+**File size cap reminder:** target ≤180 lines. Split into `voice-dictate/record.lua` + `voice-dictate/hotkey.lua` if it grows beyond.
+
+**Acceptance:**
+
+- Loading the module from a test `init.lua` does not error.
+- `hs.reload()` is clean — `m.stop()` followed by re-`require` and `m.start()` works without leaking taps or hotkeys.
+- Right Option held → menubar shows `● REC`. Release → menubar clears.
+- Cmd+Shift+D tap → `● REC`. Tap again → text appears in focused app.
+
+---
+
+## Step 3 — `install.sh`
+
+Idempotent installer. Run from repo root:
+
+```bash
+./install.sh
+```
+
+**Behavior:**
+
+1. Verify dependencies (Step 0 checks). Abort with clear message on failure.
+2. Create `~/.hammerspoon` if missing.
+3. Symlink `hammerspoon/voice-dictate.lua` → `~/.hammerspoon/voice-dictate.lua` (force-overwrite any prior symlink).
+4. Patch `~/.hammerspoon/init.lua`: append `require("voice-dictate").start()` if not already present. If the file doesn't exist, create it with that single line.
+5. Trigger `hs.reload()` via `open -g hammerspoon://reload` (the `hammerspoon://` URL scheme).
+
+**File size cap reminder:** ≤80 lines.
+
+**Acceptance:**
+
+- Fresh run on a machine with no `~/.hammerspoon` → both files created, Hammerspoon reloads, hotkeys work.
+- Second run on same machine → no duplicate `require` lines in `init.lua`, no errors.
+- Run with a dependency missing (e.g., temporarily rename `whisper-cli`) → aborts with the specific missing tool named.
+
+---
+
+## Step 4 — Per-folder READMEs (CDE compliance)
+
+Per Arrivance A1, every meaningful folder gets a README. For this project:
+
+| Folder | README owns |
+|--------|-------------|
+| `/` | Root switchboard — README.md plus siblings CLAUDE.md (engineering entry) and INVENTORY.md (master switchboard). |
+| `engineering/` | Engineering rules — switchboard + cde.md + conventions.md. |
+| `bin/` | Shell scripts — subcommand contracts, constants, smoke test. |
+| `hammerspoon/` | Lua module — exports, hotkey config, state machine. |
+
+Each README ≤80 lines. Body is purpose + contract + how to change it safely, **not** a re-paste of SPEC.
+
+---
+
+## Step 5 — End-to-end test
+
+Manual checklist run after install:
+
+1. Open VS Code. Cursor in a markdown file.
+2. Hold Right Option, say "δοκιμή ένα δύο τρία", release.
+3. Observe: menubar showed `● REC` during, system sound on start and stop, transcript pasted within 2s.
+4. Tap Cmd+Shift+D, dictate a sentence, tap again.
+5. Observe: same flow as PTT.
+6. Open Hammerspoon Console (`menubar → Console`). Verify no errors logged.
+
+If any step fails, note in PLAN.md as a known issue and triage before declaring v0.1 done.
+
+---
+
+## Step 6 — Initial commit
+
+Conventional Commits format per Arrivance convention. Single commit for v0.1:
+
+```
+feat: initial voice-dictate v0.1 — PTT and toggle Greek dictation
+
+Local whisper.cpp + Hammerspoon hotkey pipeline. Two hotkeys: Right
+Option (push-to-talk) and Cmd+Shift+D (toggle). Greek primary, English
+via Whisper multilingual at the same hotkey. No cloud, no LLM cleanup.
+```
+
+User initiates the commit. Do not auto-commit.
+
+---
+
+## Risks & mitigations
+
+| Risk | Likelihood | Mitigation |
+|------|------------|------------|
+| `ffmpeg` doesn't flush WAV on `SIGINT` cleanly | Medium | Tested: recent ffmpeg builds handle SIGINT. If broken, fall back to `SIGTERM` + ffmpeg's `q` keystroke trick via stdin. |
+| `whisper-cli -of -` doesn't write stdout | Low | Use `-otxt -of /tmp/out` + `cat /tmp/out.txt` fallback. |
+| Right Option flag watcher conflicts with system input methods | Medium | Document fallback to `F18` or hyper-key in INSTALL.md. |
+| Paste lands in wrong app if focus shifts | Low | Out-of-scope for v0.1. User mitigates by not switching apps mid-dictation. |
+| Long utterances exceed 2s latency target | Medium | Acceptance criterion is for ≤15s utterances. Long-form measured later. |
+
+---
+
+## Status
+
+- [x] Step 0 — host environment verified
+- [ ] Step 1 — `bin/dictate.sh`
+- [ ] Step 2 — `hammerspoon/voice-dictate.lua`
+- [ ] Step 3 — `install.sh`
+- [ ] Step 4 — per-folder READMEs
+- [ ] Step 5 — end-to-end test
+- [ ] Step 6 — commit
+
+[spec]: SPEC.md
