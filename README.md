@@ -67,16 +67,30 @@ If the smoke test passes but a hotkey doesn't paste, the issue is in Hammerspoon
 
 # Configuration
 
-All tunables live as named constants at the top of [bin/dictate.sh][dictate-sh] and [hammerspoon/voice-dictate.lua][lua-mod]. Override per-invocation via environment variables, or edit the defaults.
+`./install.sh` writes two local config files on first run. The committed code ships with no user-specific defaults.
 
-| Constant | Default | Where |
-|----------|---------|-------|
-| `MODEL_PATH` | `~/tiktok/whisper-models/ggml-large-v3-turbo-q5_0.bin` | [bin/dictate.sh][dictate-sh] |
-| `LANGUAGE` | `el` (Greek; use `auto` for detection, `en` for English-only) | [bin/dictate.sh][dictate-sh] |
-| `THREADS` | `8` | [bin/dictate.sh][dictate-sh] |
-| `AUDIO_DEVICE` | `:0` (macOS default mic) | [bin/dictate.sh][dictate-sh] |
-| `TOGGLE_MODS` + `TOGGLE_KEY` | `Cmd+Shift+D` | [hammerspoon/voice-dictate.lua][lua-mod] |
-| `RIGHT_ALT_KEYCODE` | `61` (Right Option; Left Option is `58`) | [hammerspoon/voice-dictate.lua][lua-mod] |
+- **`bin/config.local.sh`** — shell-side: `MODEL_PATH`, `LANGUAGE`, `THREADS`, `AUDIO_DEVICE`. Sourced by `dictate.sh` at run time. Per-invocation env overrides still work (e.g. `LANGUAGE=en ./bin/dictate.sh smoke`). Gitignored.
+- **`~/.hammerspoon/voice-dictate-config.lua`** — Hammerspoon-side: absolute path to `dictate.sh`, toggle hotkey, PTT keycode, flush delay. Loaded via `require` on every Hammerspoon reload.
+
+| Setting | File | Default |
+|---------|------|---------|
+| `MODEL_PATH` | `bin/config.local.sh` | `~/whisper-models/ggml-large-v3-turbo-q5_0.bin` (prompted at install) |
+| `LANGUAGE` | `bin/config.local.sh` | `el` (Greek; use `auto` for detection, `en` for English-only) |
+| `THREADS` | `bin/config.local.sh` | `8` |
+| `AUDIO_DEVICE` | `bin/config.local.sh` | `:0` (macOS default mic) |
+| `dictate_sh` | `~/.hammerspoon/voice-dictate-config.lua` | absolute path derived from your repo location at install |
+| `toggle_mods` + `toggle_key` | `~/.hammerspoon/voice-dictate-config.lua` | `Cmd+Shift+D` |
+| `right_alt_keycode` | `~/.hammerspoon/voice-dictate-config.lua` | `61` (Right Option; Left Option is `58`) |
+| `flush_delay_s` | `~/.hammerspoon/voice-dictate-config.lua` | `0.2` |
+
+The audio input device is picked at runtime via the menubar dropdown and persisted to `NSUserDefaults` (`hs.settings`); the `AUDIO_DEVICE` default above only applies when no device has been picked yet.
+
+Edit either file and re-trigger:
+
+- shell config: no reload needed; the next `dictate.sh` invocation picks it up.
+- Hammerspoon config: run `hs.reload()` from the Console, or restart Hammerspoon.
+
+Re-running `./install.sh` is safe — prompts pre-fill with your current values.
 
 # Architecture
 

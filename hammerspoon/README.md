@@ -31,17 +31,17 @@ One state variable (`recording`) is shared by both hotkeys. Pressing the toggle 
 
 The eventtap filters to `keycode == 61` (Right Option specifically) and uses the alt flag to distinguish press from release.
 
-### Configurable constants
+### Configurable values
 
-Top-of-file constants. Edit and `hammerspoon://reload`:
+Sourced from `~/.hammerspoon/voice-dictate-config.lua`, written by `install.sh`. Edit that file and run `hs.reload()` from the Hammerspoon Console to apply.
 
-| Constant | Default | Purpose |
-|----------|---------|---------|
-| `DICTATE_SH` | `~/Projects/myStash/voice-dictate/bin/dictate.sh` | Path to the shell entry point. |
-| `TOGGLE_MODS` | `{"cmd", "shift"}` | Modifiers for the toggle hotkey. |
-| `TOGGLE_KEY` | `"D"` | Key paired with the toggle modifiers. |
-| `RIGHT_ALT_KEYCODE` | `61` | Filters the flagsChanged eventtap. Left Option is 58. |
-| `FLUSH_DELAY_S` | `0.2` | Delay after SIGTERM before reading the WAV. Bump if recordings look truncated. |
+| Field | Default | Purpose |
+|-------|---------|---------|
+| `dictate_sh` | absolute path derived at install time | Path to the shell entry point. |
+| `toggle_mods` | `{"cmd", "shift"}` | Modifiers for the toggle hotkey. |
+| `toggle_key` | `"D"` | Key paired with the toggle modifiers. |
+| `right_alt_keycode` | `61` | Filters the flagsChanged eventtap. Left Option is `58`. |
+| `flush_delay_s` | `0.2` | Delay after SIGTERM before reading the WAV. Bump if recordings look truncated. |
 
 ### Failure modes
 

@@ -9,9 +9,10 @@ Master switchboard. Authoritative root map of the repository. Every entry is one
 - [SPEC.md](SPEC.md) — Locked v0.1 scope, architecture, configuration surface, dependencies, open questions.
 - [PLAN.md](PLAN.md) — Implementation steps with acceptance criteria and current status.
 - [INSTALL.md](INSTALL.md) — One-shot install, macOS permissions walkthrough, smoke-test path, uninstall.
-- [install.sh](install.sh) — Idempotent installer: verifies deps, symlinks the Lua module, patches init.lua, reloads.
+- [install.sh](install.sh) — Idempotent installer: verifies deps, prompts for runtime config, writes the two local config files, symlinks the Lua module, patches init.lua, reloads.
 - [LICENSE](LICENSE) — ISC license: usage, modification, and distribution terms.
 - [SECURITY.md](SECURITY.md) — Vulnerability reporting policy and supported versions.
+- [.gitignore](.gitignore) — Ignored paths: macOS metadata and the local shell config written by install.sh.
 
 ## [engineering/](engineering/)
 
@@ -31,6 +32,7 @@ Shell-side recorder and transcriber. Leaf README: [bin/README.md](bin/README.md)
 Lua module loaded from the user's `~/.hammerspoon/init.lua`. Leaf README: [hammerspoon/README.md](hammerspoon/README.md).
 
 - [hammerspoon/voice-dictate.lua](hammerspoon/voice-dictate.lua) — Hotkey handlers, state machine, menubar, paste. Public API: `M.start()` / `M.stop()`.
+- [hammerspoon/voice-dictate-mic.lua](hammerspoon/voice-dictate-mic.lua) — Mic picker: avfoundation device scan, menubar dropdown, NSUserDefaults persistence.
 
 ## [.github/](.github/)
 

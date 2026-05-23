@@ -27,10 +27,12 @@ cd ~/Projects/myStash/voice-dictate
 
 What it does, in order:
 
-1. Verifies `ffmpeg`, `whisper-cli`, `/Applications/Hammerspoon.app`, and the model file.
-2. Symlinks `hammerspoon/voice-dictate.lua` into `~/.hammerspoon/voice-dictate.lua`.
-3. Appends `require("voice-dictate").start()` to `~/.hammerspoon/init.lua` (idempotent — re-runs are safe).
-4. Triggers `hammerspoon://reload` to apply without restarting the app.
+1. Verifies `ffmpeg`, `whisper-cli`, and `/Applications/Hammerspoon.app`.
+2. Prompts for your Whisper model path and default language. Pre-fills from any existing `bin/config.local.sh` on re-runs.
+3. Writes `bin/config.local.sh` (gitignored) and `~/.hammerspoon/voice-dictate-config.lua` with the chosen values plus the technical defaults (threads, audio device, hotkey settings).
+4. Symlinks `hammerspoon/voice-dictate.lua` into `~/.hammerspoon/voice-dictate.lua`.
+5. Appends `require("voice-dictate").start()` to `~/.hammerspoon/init.lua` (idempotent — re-runs are safe).
+6. Triggers `hammerspoon://reload` to apply without restarting the app.
 
 ## Grant macOS permissions
 
@@ -74,12 +76,13 @@ If `smoke` passes but the hotkey doesn't paste, the problem is in Hammerspoon (p
 
 ```bash
 rm ~/.hammerspoon/voice-dictate.lua
+rm ~/.hammerspoon/voice-dictate-config.lua
 # then edit ~/.hammerspoon/init.lua and remove the line:
 #   require("voice-dictate").start()
 open -g hammerspoon://reload
 ```
 
-The repo at `~/Projects/myStash/voice-dictate` is untouched — delete it manually if you want it gone.
+The cloned repo is untouched — delete it manually if you want it gone. Its `bin/config.local.sh` is gitignored and disappears with the repo.
 
 [whisper-cpp]: https://github.com/ggerganov/whisper.cpp
 [hammerspoon]: https://www.hammerspoon.org/
