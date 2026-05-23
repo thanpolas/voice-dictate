@@ -4,12 +4,14 @@ Master switchboard. Authoritative root map of the repository. Every entry is one
 
 ## Root files
 
-- [README.md](README.md) — Orientation: what voice-dictate is, the two hotkeys, switchboard links.
+- [README.md](README.md) — Public-facing overview: prerequisites, install, usage, configuration, architecture, engineering, license.
 - [CLAUDE.md](CLAUDE.md) — Engineering entry point: CDE, hard principles, comments, markdown, naming, commits.
 - [SPEC.md](SPEC.md) — Locked v0.1 scope, architecture, configuration surface, dependencies, open questions.
 - [PLAN.md](PLAN.md) — Implementation steps with acceptance criteria and current status.
 - [INSTALL.md](INSTALL.md) — One-shot install, macOS permissions walkthrough, smoke-test path, uninstall.
 - [install.sh](install.sh) — Idempotent installer: verifies deps, symlinks the Lua module, patches init.lua, reloads.
+- [LICENSE](LICENSE) — ISC license: usage, modification, and distribution terms.
+- [SECURITY.md](SECURITY.md) — Vulnerability reporting policy and supported versions.
 
 ## [engineering/](engineering/)
 
@@ -29,6 +31,12 @@ Shell-side recorder and transcriber. Leaf README: [bin/README.md](bin/README.md)
 Lua module loaded from the user's `~/.hammerspoon/init.lua`. Leaf README: [hammerspoon/README.md](hammerspoon/README.md).
 
 - [hammerspoon/voice-dictate.lua](hammerspoon/voice-dictate.lua) — Hotkey handlers, state machine, menubar, paste. Public API: `M.start()` / `M.stop()`.
+
+## [.github/](.github/)
+
+GitHub-specific metadata. Not loaded by the running tool.
+
+- [.github/FUNDING.yml](.github/FUNDING.yml) — GitHub Sponsors button configuration shown on the repo page.
 
 ## [.claude/](.claude/)
 
