@@ -63,7 +63,7 @@ Full rules: [`engineering/conventions.md`][conventions-md] § Comments and docbl
 
 [Conventional Commits][conventional-commits] format. Imperative mood, first line ≤72 chars, body explains why.
 
-**No commits without explicit instruction.** Never stage, commit, or push without being told to. The user controls git history. The [`check-not-on-main.sh`][hook-not-on-main] PreToolUse hook blocks edits while on `main` — branch before editing through a session.
+**No commits without explicit instruction.** Never stage, commit, or push without being told to. The user controls git history.
 
 [engineering]: engineering/
 [engineering-readme]: engineering/README.md
@@ -74,5 +74,4 @@ Full rules: [`engineering/conventions.md`][conventions-md] § Comments and docbl
 [hammerspoon-readme]: hammerspoon/README.md
 [spec-md]: SPEC.md
 [plan-md]: PLAN.md
-[hook-not-on-main]: .claude/hooks/check-not-on-main.sh
 [conventional-commits]: https://www.conventionalcommits.org/
