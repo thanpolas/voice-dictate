@@ -129,7 +129,7 @@ Rules:
 
 ## No commits without explicit instruction
 
-Never stage, commit, or push without being explicitly told to. The user controls git history. The [`check-not-on-main.sh`][hook-not-on-main] PreToolUse hook blocks edits while on `main` — branch before editing through a session.
+Never stage, commit, or push without being explicitly told to. The user controls git history.
 
 ## Bug fixes — failing test first (where possible)
 
@@ -150,5 +150,4 @@ For bugs on the non-testable surface — audio I/O, Hammerspoon Lua, hotkey hand
 [spec-md]: ../SPEC.md
 [plan-md]: ../PLAN.md
 [cde-md]: cde.md
-[hook-not-on-main]: ../.claude/hooks/check-not-on-main.sh
 [conventional-commits]: https://www.conventionalcommits.org/
