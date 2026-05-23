@@ -16,24 +16,26 @@ dictate.sh smoke                   transcribe bundled JFK fixture; assert non-em
 - **`transcribe`** — calls `whisper-cli -nt -np` (no timestamps, no progress prints). Output is post-processed: newlines → spaces, whitespace collapsed, ends trimmed. Result is one paste-ready line on stdout. Stderr is suppressed; errors surface through exit code only.
 - **`smoke`** — uses `/opt/homebrew/share/whisper-cpp/jfk.wav` (the fixture brew installs alongside whisper-cpp). For meaningful assertion, run as `LANGUAGE=en dictate.sh smoke`.
 
-### Configurable constants
+### Configurable values
 
-All four are environment-overridable (`VAR=x dictate.sh ...`) and then locked readonly inside the script:
+All four runtime values are sourced from a sibling `config.local.sh` (gitignored, written by `install.sh`) and then locked readonly inside the script. Per-invocation env overrides still work — `config.local.sh` uses the `: "${VAR:=…}"` default form, so a pre-set env value wins.
 
-| Constant | Default | Purpose |
+| Variable | Default | Purpose |
 |----------|---------|---------|
-| `MODEL_PATH` | `~/whisper-models/ggml-large-v3-turbo-q5_0.bin` | The Whisper checkpoint. Swap to medium / large variants here. |
-| `LANGUAGE` | `el` | Whisper `-l` flag. Use `auto` for detection, `en` for English-only. |
+| `MODEL_PATH` | prompted at install (`~/whisper-models/ggml-large-v3-turbo-q5_0.bin`) | The Whisper checkpoint. Swap to medium / large variants here. |
+| `LANGUAGE` | `el` (prompted) | Whisper `-l` flag. Use `auto` for detection, `en` for English-only. |
 | `THREADS` | `8` | whisper-cli `-t` flag. Match physical core count. |
 | `AUDIO_DEVICE` | `:0` | ffmpeg avfoundation device spec. List devices with `ffmpeg -f avfoundation -list_devices true -i ""`. |
 
 ### Changing the model
 
-One-line edit at the top of [dictate.sh](dictate.sh), or override per-invocation:
+Edit `config.local.sh`, or override per-invocation:
 
 ```bash
-MODEL_PATH=~/whisper-models/ggml-medium-q5_0.bin dictate.sh smoke
+MODEL_PATH=~/whisper-models/ggml-medium-q5_0.bin ./dictate.sh smoke
 ```
+
+Re-running `../install.sh` is another way — it prompts with your current value as the default.
 
 ### PATH handling
 

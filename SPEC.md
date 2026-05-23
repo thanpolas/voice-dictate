@@ -128,16 +128,21 @@ voice-dictate/
 
 ## Configuration surface
 
-All tunable values live as named constants at the top of their respective files. No config file in v0.1.
+All tunable values live in two local config files written by `install.sh` on first run; the committed code carries no user-specific defaults. Re-running `install.sh` doubles as the reconfiguration command — prompts pre-fill from the existing config.
 
-| Constant | File | Default | Why |
-|----------|------|---------|-----|
-| `MODEL_PATH` | `bin/dictate.sh` | `~/whisper-models/ggml-large-v3-turbo-q5_0.bin` | Accuracy-first; ~5% Greek WER. |
-| `LANGUAGE` | `bin/dictate.sh` | `el` | Greek primary. |
-| `THREADS` | `bin/dictate.sh` | `8` | Matches user's existing `transcribe()` function. |
-| `AUDIO_DEVICE` | `bin/dictate.sh` | `:0` | macOS default mic. |
-| `PTT_HOTKEY` | `hammerspoon/voice-dictate.lua` | `rightAlt` (Right Option) | Universal modifier, non-conflicting. |
-| `TOGGLE_HOTKEY` | `hammerspoon/voice-dictate.lua` | `cmd+shift+D` | Mnemonic (D = dictate). |
+- `bin/config.local.sh` — gitignored, in-repo. Sourced by `dictate.sh`. Holds `MODEL_PATH`, `LANGUAGE`, `THREADS`, `AUDIO_DEVICE`.
+- `~/.hammerspoon/voice-dictate-config.lua` — outside the repo. Required by the Lua module. Holds the absolute `dictate_sh` path, `toggle_mods`, `toggle_key`, `right_alt_keycode`, `flush_delay_s`.
+
+| Setting | File | Default | Why |
+|---------|------|---------|-----|
+| `MODEL_PATH` | `bin/config.local.sh` | `~/whisper-models/ggml-large-v3-turbo-q5_0.bin` (prompted) | Accuracy-first; ~5% Greek WER. |
+| `LANGUAGE` | `bin/config.local.sh` | `el` (prompted) | Greek primary. |
+| `THREADS` | `bin/config.local.sh` | `8` | Common physical core count on M-series. |
+| `AUDIO_DEVICE` | `bin/config.local.sh` | `:0` | macOS default mic. |
+| `dictate_sh` | `~/.hammerspoon/voice-dictate-config.lua` | `<repo>/bin/dictate.sh` (derived at install) | Lua module is symlinked into `~/.hammerspoon/`; needs absolute path to invoke the shell. |
+| `toggle_mods` + `toggle_key` | `~/.hammerspoon/voice-dictate-config.lua` | `cmd+shift+D` | Mnemonic (D = dictate). |
+| `right_alt_keycode` | `~/.hammerspoon/voice-dictate-config.lua` | `61` | Right Option, the PTT trigger; Left Option (`58`) is ignored. |
+| `flush_delay_s` | `~/.hammerspoon/voice-dictate-config.lua` | `0.2` | ffmpeg flush window after SIGTERM. |
 
 ---
 
@@ -205,6 +210,7 @@ To prevent scope creep — these are deferred to v0.2+, not silently dropped:
 
 ## Changelog
 
+- **2026-05-23 — config bootstrap.** Moved all user-tunable values out of committed code and into two local config files written by `install.sh` (`bin/config.local.sh`, `~/.hammerspoon/voice-dictate-config.lua`). The repo now carries no user-specific defaults; install prompts for `MODEL_PATH` and `LANGUAGE`, derives the rest.
 - **2026-05-20 — v0.1 spec drafted.** Scope locked to record/transcribe/paste with two hotkeys. Model: `large-v3-turbo-q5_0`. Latency target relaxed to ≤5s for accuracy.
 
 [whisper-cpp]: https://github.com/ggerganov/whisper.cpp

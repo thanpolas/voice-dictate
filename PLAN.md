@@ -91,12 +91,13 @@ Idempotent installer. Run from repo root:
 **Behavior:**
 
 1. Verify dependencies (Step 0 checks). Abort with clear message on failure.
-2. Create `~/.hammerspoon` if missing.
-3. Symlink `hammerspoon/voice-dictate.lua` → `~/.hammerspoon/voice-dictate.lua` (force-overwrite any prior symlink).
-4. Patch `~/.hammerspoon/init.lua`: append `require("voice-dictate").start()` if not already present. If the file doesn't exist, create it with that single line.
-5. Trigger `hs.reload()` via `open -g hammerspoon://reload` (the `hammerspoon://` URL scheme).
+2. Prompt for `MODEL_PATH` and `LANGUAGE`, pre-filling from any existing `bin/config.local.sh`. Write that file plus `~/.hammerspoon/voice-dictate-config.lua` (path to `dictate.sh` + hotkey defaults).
+3. Create `~/.hammerspoon` if missing.
+4. Symlink `hammerspoon/voice-dictate.lua` → `~/.hammerspoon/voice-dictate.lua` (force-overwrite any prior symlink).
+5. Patch `~/.hammerspoon/init.lua`: append `require("voice-dictate").start()` if not already present. If the file doesn't exist, create it with that single line.
+6. Trigger `hs.reload()` via `open -g hammerspoon://reload` (the `hammerspoon://` URL scheme).
 
-**File size cap reminder:** ≤80 lines.
+**File size cap reminder:** under the 200-line project soft cap.
 
 **Acceptance:**
 

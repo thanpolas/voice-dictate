@@ -6,7 +6,11 @@
 #   transcribe <wav-path>  Run whisper-cli; print plain transcript to stdout.
 #   smoke                  Transcribe bundled JFK fixture; assert non-empty output.
 #
-# Exit codes: 0 on success, 1 on usage error or assertion failure, propagated
+# Runtime config (MODEL_PATH, LANGUAGE, THREADS, AUDIO_DEVICE) is sourced from
+# the sibling bin/config.local.sh file written by install.sh. Per-invocation
+# environment overrides still work (e.g. LANGUAGE=en ./bin/dictate.sh smoke).
+#
+# Exit codes: 0 on success, 1 on usage error or missing config, propagated
 # child exit code on ffmpeg / whisper-cli failure.
 
 set -euo pipefail
@@ -15,27 +19,28 @@ set -euo pipefail
 # (ffmpeg, whisper-cli) are reachable regardless of caller environment.
 export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 
-# ───── constants ──────────────────────────────────────────────────────────────
-# Each accepts an environment-variable override (e.g. `LANGUAGE=auto dictate.sh ...`)
-# and is then locked readonly for the rest of the run.
+# ───── local config ──────────────────────────────────────────────────────────
 
-# Absolute path to the quantized large-v3-turbo Whisper model.
-: "${MODEL_PATH:=${HOME}/whisper-models/ggml-large-v3-turbo-q5_0.bin}"
-readonly MODEL_PATH
+# Absolute path to this script's directory — used to locate the sibling config.
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Spoken language passed to whisper-cli (`el` = Greek; `auto` for detection).
-: "${LANGUAGE:=el}"
-readonly LANGUAGE
+# User-specific runtime config; gitignored, written by install.sh.
+readonly LOCAL_CONFIG="${SCRIPT_DIR}/config.local.sh"
 
-# CPU threads for whisper inference; matches user's existing transcribe() helper.
-: "${THREADS:=8}"
-readonly THREADS
+if [[ ! -f "${LOCAL_CONFIG}" ]]; then
+  echo "dictate: missing ${LOCAL_CONFIG}. Run ./install.sh from the repo root." >&2
+  exit 1
+fi
 
-# avfoundation audio input spec — `:0` selects the macOS default microphone (no video).
-: "${AUDIO_DEVICE:=:0}"
-readonly AUDIO_DEVICE
+# shellcheck source=/dev/null
+source "${LOCAL_CONFIG}"
+
+# Lock the sourced values for the rest of the run; env overrides applied
+# before invocation win because config.local.sh uses the `: "${VAR:=…}"` form.
+readonly MODEL_PATH LANGUAGE THREADS AUDIO_DEVICE
 
 # Path to whisper.cpp's bundled JFK fixture used by the smoke subcommand.
+# Not user-tunable — it is the brew-installed shared fixture.
 readonly SMOKE_FIXTURE="/opt/homebrew/share/whisper-cpp/jfk.wav"
 
 # ───── subcommands ────────────────────────────────────────────────────────────
