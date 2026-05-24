@@ -45,14 +45,42 @@ readonly SMOKE_FIXTURE="/opt/homebrew/share/whisper-cpp/jfk.wav"
 
 # ───── subcommands ────────────────────────────────────────────────────────────
 
-# Record audio from the default microphone to <wav-path> until SIGINT.
+# Record audio from <device> (or the default mic) to <wav-path> until SIGINT.
 # ffmpeg writes the WAV trailer and exits 0 on SIGINT, leaving a valid file.
+# Passing the device as a positional arg (rather than via env) lets Hammerspoon
+# spawn dictate.sh directly — wrapping in /usr/bin/env breaks the TCC chain
+# because macOS treats `env` as the responsible process for the child's mic
+# access, and `env` has no Privacy & Security entry.
 function record() {
-  local wav="${1:?usage: dictate.sh record <wav-path>}"
-  exec ffmpeg -hide_banner -loglevel error -nostdin -y \
-    -f avfoundation -i "${AUDIO_DEVICE}" \
+  local wav="${1:?usage: dictate.sh record <wav-path> [device]}"
+  local device="${2:-${AUDIO_DEVICE}}"
+  local log="${wav%.wav}.log"
+  echo "dictate: record start wav=${wav} device=${device}" > "${log}"
+  # Bash-wrapper signal forwarding. We do NOT exec ffmpeg — bash stays as the
+  # parent process so Hammerspoon's SIGTERM hits bash (which is not blocked on
+  # avfoundation and processes signals instantly). Bash then forwards SIGINT
+  # to ffmpeg, which ffmpeg handles as a graceful quit: flush WAV trailer and
+  # exit. SIGKILL on ffmpeg loses all in-memory buffer (no data on disk), so
+  # we never let Hammerspoon hard-kill ffmpeg directly.
+  # NO -nostdin: with -nostdin under avfoundation, ffmpeg's signal handling
+  # blocks for many seconds (signals only checked between avfoundation reads).
+  # With stdin connected, signal handling completes in milliseconds.
+  # </dev/null is explicit: we don't want ffmpeg to read anything from stdin,
+  # we just need stdin to be open so signal handling stays fast.
+  ffmpeg -hide_banner -y \
+    -f avfoundation -i "${device}" \
     -ar 16000 -ac 1 -acodec pcm_s16le \
-    "${wav}"
+    "${wav}" 2>> "${log}" </dev/null &
+  local ffmpeg_pid="${!}"
+  echo "dictate: ffmpeg pid=${ffmpeg_pid}" >> "${log}"
+  trap "kill -INT ${ffmpeg_pid} 2>/dev/null || true" TERM INT
+  # bash's `wait` is interrupted by signals and returns even though the child
+  # is still running. Loop until ffmpeg is actually gone so we don't leave an
+  # orphan with an unflushed WAV.
+  while kill -0 "${ffmpeg_pid}" 2>/dev/null; do
+    wait "${ffmpeg_pid}" 2>/dev/null || true
+  done
+  echo "dictate: ffmpeg exited" >> "${log}"
 }
 
 # Transcribe <wav-path>; print plain text transcript to stdout.
@@ -63,12 +91,16 @@ function transcribe() {
     echo "dictate: model not found at ${MODEL_PATH}" >&2
     return 1
   fi
+  # whisper-cli prints ANSI escape sequences (\e(B\e[m) at start/end to reset
+  # terminal state. Those leak into the paste as the visible literal "(B[m"
+  # unless stripped. Perl handles \e literally; BSD sed on macOS does not.
   whisper-cli \
     -m "${MODEL_PATH}" \
     -f "${wav}" \
     -l "${LANGUAGE}" \
     -t "${THREADS}" \
     -nt -np 2>/dev/null \
+    | perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\([A-Z]//g' \
     | tr '\n' ' ' \
     | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]+/ /g'
 }

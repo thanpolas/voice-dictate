@@ -37,7 +37,7 @@ The default macOS dictation is mediocre for Greek and cannot mix Greek with Engl
 | **Push-to-talk** | Hold `Right Option` → records while held → on release, transcribe and paste. |
 | **Toggle** | Tap `Cmd+Shift+D` to start, tap again to stop, then transcribe and paste. |
 | **Audio cues** | Distinct system sound on start and on stop. No silence-detection beep. |
-| **Menubar indicator** | Text changes to `● REC` while recording, blank otherwise. |
+| **Menubar indicator** | `○` idle, `● REC` while recording. Clicking the item opens a dropdown that re-scans avfoundation audio inputs on every open and lets the user pick the active mic; the choice persists in NSUserDefaults via `hs.settings`. |
 | **Output mechanism** | Copy to clipboard, simulate `Cmd+V` into focused app. |
 | **Failure UX** | Hammerspoon notification with stderr tail when transcription fails. |
 
@@ -89,9 +89,15 @@ PTT and toggle share one state variable — pressing the toggle hotkey while PTT
 
 ### Audio capture
 
-- `ffmpeg -f avfoundation -i ":0"` — index `:0` is the default microphone on macOS.
+- `ffmpeg -f avfoundation -i "$AUDIO_DEVICE"` — Hammerspoon passes the user's chosen index (e.g. `:2`) as an env var via `/usr/bin/env` so the rest of the parent environment is inherited intact. Falls back to `:0` (macOS default mic) when nothing is set; on machines where `:0` is a virtual device, the user picks the real mic from the menubar dropdown.
 - Output: 16 kHz mono PCM WAV → `/tmp/voice-dictate-<unix-ts>.wav`.
 - ffmpeg handles `SIGINT` by flushing and exiting 0 (verified behavior of recent ffmpeg builds).
+
+### Mic selection
+
+- Menubar dropdown lists avfoundation audio inputs by name. Re-scanned via `ffmpeg -list_devices` on every menu open so plug/unplug of USB and Bluetooth devices is reflected live.
+- Active selection persists in NSUserDefaults under the key `voice-dictate.audioDevice` via `hs.settings`. This is not a user-editable config file — it survives reboots and Hammerspoon reloads without touching `~/.config/`.
+- The selection is read fresh at the start of every recording, so changing mics takes effect on the next utterance, not on reload.
 
 ### Transcription
 
@@ -118,7 +124,8 @@ voice-dictate/
 │   └── dictate.sh           # record / transcribe entry point
 ├── hammerspoon/
 │   ├── README.md            # Lua module — exports, hotkeys
-│   └── voice-dictate.lua    # loadable from user's init.lua
+│   ├── voice-dictate.lua    # loadable from user's init.lua
+│   └── voice-dictate-mic.lua # mic-picker sibling — scan / persist / build menu
 └── install.sh               # symlinks hammerspoon/voice-dictate.lua into ~/.hammerspoon and wires loader
 ```
 
@@ -138,7 +145,8 @@ All tunable values live in two local config files written by `install.sh` on fir
 | `MODEL_PATH` | `bin/config.local.sh` | `~/whisper-models/ggml-large-v3-turbo-q5_0.bin` (prompted) | Accuracy-first; ~5% Greek WER. |
 | `LANGUAGE` | `bin/config.local.sh` | `el` (prompted) | Greek primary. |
 | `THREADS` | `bin/config.local.sh` | `8` | Common physical core count on M-series. |
-| `AUDIO_DEVICE` | `bin/config.local.sh` | `:0` | macOS default mic. |
+| `AUDIO_DEVICE` | `bin/config.local.sh` | `:0` | Shell-side fallback. Overridden per-invocation by Hammerspoon via env var when a mic is picked in the menubar. |
+| `voice-dictate.audioDevice` | NSUserDefaults (via `hs.settings`) | unset → `:0` | User-selected avfoundation index. Written by the menubar picker, read on every record. Not a config file. |
 | `dictate_sh` | `~/.hammerspoon/voice-dictate-config.lua` | `<repo>/bin/dictate.sh` (derived at install) | Lua module is symlinked into `~/.hammerspoon/`; needs absolute path to invoke the shell. |
 | `toggle_mods` + `toggle_key` | `~/.hammerspoon/voice-dictate-config.lua` | `cmd+shift+D` | Mnemonic (D = dictate). |
 | `right_alt_keycode` | `~/.hammerspoon/voice-dictate-config.lua` | `61` | Right Option, the PTT trigger; Left Option (`58`) is ignored. |
@@ -210,6 +218,8 @@ To prevent scope creep — these are deferred to v0.2+, not silently dropped:
 
 ## Changelog
 
+- **2026-05-24 — menubar spinner during transcription.** Transcription moved off `hs.execute` (synchronous, blocking) onto `hs.task` (async), freeing the Hammerspoon main thread to drive a 10-frame braille spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) in the menubar while whisper-cli runs. Idle title remains `○`; spinner cycles at 80ms; recovers to idle on paste.
+- **2026-05-23 — menubar mic picker.** Replaced the static `:0` mic assumption with a menubar dropdown that re-scans avfoundation inputs on every open and persists the user's choice in NSUserDefaults via `hs.settings`. Hammerspoon passes the selected index into `dictate.sh` per recording. Picker code lives in `hammerspoon/voice-dictate-mic.lua`, sibling to the main module.
 - **2026-05-23 — config bootstrap.** Moved all user-tunable values out of committed code and into two local config files written by `install.sh` (`bin/config.local.sh`, `~/.hammerspoon/voice-dictate-config.lua`). The repo now carries no user-specific defaults; install prompts for `MODEL_PATH` and `LANGUAGE`, derives the rest.
 - **2026-05-20 — v0.1 spec drafted.** Scope locked to record/transcribe/paste with two hotkeys. Model: `large-v3-turbo-q5_0`. Latency target relaxed to ≤5s for accuracy.
 

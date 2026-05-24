@@ -43,6 +43,12 @@ local MENUBAR_IDLE = "○"
 --- Menubar title shown while recording.
 local MENUBAR_RECORDING = "● REC"
 
+--- Braille spinner frames shown while transcription is in flight.
+local SPINNER_FRAMES = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+--- Seconds between spinner frame updates. 80ms is the standard CLI spinner rate.
+local SPINNER_INTERVAL_S = 0.08
+
 -- ───── module state ─────────────────────────────────────────────────────────
 
 --- True between startRecording() and stopRecording().
@@ -63,6 +69,10 @@ local hotkeyToggle = nil
 --- Eventtap watching flagsChanged events to implement push-to-talk on Right Option.
 local pttTap = nil
 
+--- hs.timer animating the menubar spinner while transcription is running.
+--- Nil between transcriptions.
+local spinnerTimer = nil
+
 -- ───── helpers ──────────────────────────────────────────────────────────────
 
 --- Compute a unique temporary WAV path under /tmp.
@@ -76,6 +86,32 @@ end
 local function setMenubarRecording(isRecording)
   if not menubar then return end
   menubar:setTitle(isRecording and MENUBAR_RECORDING or MENUBAR_IDLE)
+end
+
+--- Animate a braille spinner in the menubar while transcription runs. The
+--- timer ticks every SPINNER_INTERVAL_S; if recording starts mid-spinner the
+--- frame update is skipped so `● REC` stays visible.
+local function startSpinner()
+  if not menubar or spinnerTimer then return end
+  local i = 1
+  spinnerTimer = hs.timer.doEvery(SPINNER_INTERVAL_S, function()
+    if menubar and not recording then
+      menubar:setTitle(SPINNER_FRAMES[i])
+    end
+    i = (i % #SPINNER_FRAMES) + 1
+  end)
+end
+
+--- Stop the spinner timer and restore the idle title (unless recording is
+--- active, in which case `● REC` keeps showing).
+local function stopSpinner()
+  if spinnerTimer then
+    spinnerTimer:stop()
+    spinnerTimer = nil
+  end
+  if menubar and not recording then
+    menubar:setTitle(MENUBAR_IDLE)
+  end
 end
 
 --- Play the macOS Tink sound (start cue). No-op if the system sound is missing.
@@ -97,55 +133,111 @@ local function notify(title, body)
   hs.notify.new({title = title, informativeText = body}):send()
 end
 
---- Synchronously transcribe currentWav and paste the result into the focused app.
---- Surfaces failures via notify() + Hammerspoon Console; never throws.
-local function transcribeAndPaste()
-  if not currentWav then return end
-  local cmd = DICTATE_SH .. " transcribe '" .. currentWav .. "'"
-  local out, status = hs.execute(cmd, true)
-  if not status or out == nil or out:gsub("%s+", "") == "" then
-    notify("voice-dictate", "transcription failed — see Hammerspoon Console")
-    print("voice-dictate transcribe failed: " .. tostring(out))
-    return
-  end
-  local transcript = out:gsub("[\n%s]+$", "")
-  hs.pasteboard.setContents(transcript)
-  hs.eventtap.keyStroke({"cmd"}, "v", 0)
+--- Strip ANSI/VT100 escape sequences from a string. Defends against shell
+--- init noise (e.g. bash-completion errors), whisper-cli color resets, and
+--- anything else that injects byte 0x1B + sequence. Covers CSI (\e[…),
+--- charset designation (\e(…, \e)…), OSC (\e]…BEL), and 2-byte ESC <letter>.
+local function stripAnsi(s)
+  return (s
+    :gsub("\27%[[%d;?]*[a-zA-Z]", "")        -- CSI: ESC [ params letter
+    :gsub("\27%]%d+;[^\7\27]*\7", "")        -- OSC: ESC ] params BEL
+    :gsub("\27[%(%)%*%+][A-Za-z0-9]", "")    -- charset designation
+    :gsub("\27[A-Za-z=>]", "")               -- 2-byte ESC <letter>
+  )
+end
+
+--- Asynchronously transcribe the given WAV and paste the result. Uses hs.task
+--- (NOT hs.execute) so the Hammerspoon main thread stays free to animate the
+--- menubar spinner and respond to other input while whisper-cli runs.
+---
+--- hs.task spawns dictate.sh directly without going through a shell, so the
+--- login-shell ANSI leak that affected hs.execute(cmd, true) cannot happen
+--- here. dictate.sh's own perl ANSI-strip + the stripAnsi() pass keep the
+--- transcript clean either way.
+--- @param wav string Absolute path to the WAV to transcribe.
+local function transcribeAndPaste(wav)
+  if not wav then return end
+  startSpinner()
+  local task = hs.task.new(DICTATE_SH,
+    function(exitCode, stdOut, stdErr)
+      stopSpinner()
+      if exitCode ~= 0 or stdOut == nil or stdOut:gsub("%s+", "") == "" then
+        notify("voice-dictate", "transcription failed — see Hammerspoon Console")
+        print(string.format("voice-dictate transcribe failed: exit=%s stderr=%q",
+          tostring(exitCode), tostring(stdErr)))
+        return
+      end
+      local transcript = stripAnsi(stdOut):gsub("^[\n%s]+", ""):gsub("[\n%s]+$", "")
+      if transcript:find("\27") then
+        print(string.format("[vd] WARNING: ESC byte survived stripAnsi — raw=%q clean=%q",
+          stdOut:sub(1, 60), transcript:sub(1, 60)))
+      end
+      hs.pasteboard.setContents(transcript)
+      hs.eventtap.keyStroke({"cmd"}, "v", 0)
+    end,
+    {"transcribe", wav})
+  task:start()
 end
 
 -- ───── state transitions ────────────────────────────────────────────────────
 
 --- Spawn dictate.sh record as a background task; transition to recording state.
---- The chosen mic is injected as AUDIO_DEVICE via `/usr/bin/env` so the rest of
---- Hammerspoon's environment is inherited (hs.task:setEnvironment replaces).
+--- The chosen mic is passed as a positional argument so Hammerspoon stays the
+--- direct parent of dictate.sh / ffmpeg — wrapping in `/usr/bin/env` breaks
+--- macOS TCC because `env` becomes the responsible process for mic access.
 --- No-op if already recording (PTT held while toggle active, or vice versa).
 local function startRecording()
   if recording then return end
   currentWav = newWavPath()
-  recordTask = hs.task.new("/usr/bin/env", nil, {
-    "AUDIO_DEVICE=" .. mic.loadAudioDevice(),
-    DICTATE_SH,
-    "record",
-    currentWav,
-  })
+  local wav = currentWav
+  recordTask = hs.task.new(DICTATE_SH,
+    function(exitCode, _stdOut, stdErr)
+      -- ffmpeg has actually exited (via SIGINT forwarded by dictate.sh's bash
+      -- wrapper) and the WAV trailer is written. Transcribe NOW — driven by
+      -- the task's own exit, not a timer.
+      if exitCode ~= 0 then
+        print(string.format("[vd] ffmpeg exit=%s stderr=%q", tostring(exitCode), tostring(stdErr)))
+      end
+      transcribeAndPaste(wav)
+    end,
+    {"record", currentWav, mic.loadAudioDevice()})
   recordTask:start()
   recording = true
   setMenubarRecording(true)
   playStartCue()
 end
 
---- Terminate the recording task; after a short flush delay, transcribe and paste.
---- No-op if not currently recording.
+--- Send ONE SIGTERM to ffmpeg and reset state. Transcription fires from the
+--- recordTask exit callback (see startRecording) once ffmpeg has actually
+--- finished and the WAV trailer is written — not on a fixed timer.
+---
+--- Why one SIGTERM, not three: ffmpeg treats 3+ signals received in rapid
+--- succession as "Received > 3 system signals, hard exiting" — it aborts
+--- without flushing the muxer, producing a zero-byte WAV. Sending exactly
+--- one SIGTERM and waiting for the natural exit gives a complete WAV.
+---
+--- Why `hs.task.new("/bin/kill", ...)` rather than `recordTask:terminate()`:
+--- the latter would signal Hammerspoon's direct child (the bash wrapper)
+--- which then re-signals ffmpeg; an explicit kill by PID hits ffmpeg's
+--- parent bash directly via the same path and keeps signal-source
+--- bookkeeping in one place.
 local function stopRecording()
   if not recording then return end
   if recordTask then
-    recordTask:terminate()
+    local pid = recordTask:pid()
+    -- Signal dictate.sh's bash wrapper. Bash traps SIGTERM and forwards SIGINT
+    -- to ffmpeg, which flushes the WAV trailer and exits gracefully. The
+    -- recordTask exit callback fires when bash exits, which triggers transcribe.
+    -- Tested end-to-end by bin/test-record-shutdown.sh — typical shutdown
+    -- latency is ~10ms.
+    if pid and pid > 0 then
+      hs.task.new("/bin/kill", nil, {"-TERM", tostring(pid)}):start()
+    end
     recordTask = nil
   end
   recording = false
   setMenubarRecording(false)
   playStopCue()
-  hs.timer.doAfter(FLUSH_DELAY_S, transcribeAndPaste)
 end
 
 -- ───── input handlers ───────────────────────────────────────────────────────
