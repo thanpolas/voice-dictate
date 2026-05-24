@@ -54,12 +54,14 @@ Open the Hammerspoon Console (menubar icon → **Console**). After a clean reloa
 voice-dictate: ready (PTT = Right Option, Toggle = Cmd+Shift+D)
 ```
 
-Click into any text field and:
+Pick your mic from the menubar: click the `○` item → the dropdown re-scans your avfoundation audio inputs and shows them by name. Select the one you want (a check appears next to it). The choice is remembered across reloads and reboots.
+
+Then click into any text field and:
 
 - Hold **Right Option**, speak, release → transcript pastes.
 - Tap **Cmd+Shift+D**, speak, tap again → transcript pastes.
 
-Menubar shows `● REC` while recording. System sounds play on start and stop.
+Menubar shows `● REC` while recording, `○` when idle. System sounds play on start and stop.
 
 ## Smoke-test the shell side independently
 

@@ -1,6 +1,6 @@
 # bin — shell side
 
-Single script, three subcommands. Spawned by [voice-dictate.lua](../hammerspoon/voice-dictate.lua) but standalone-runnable for testing.
+`dictate.sh` is the record/transcribe entry point spawned by [voice-dictate.lua](../hammerspoon/voice-dictate.lua); standalone-runnable for manual testing. Three sibling scripts provide automated tests and a process watchdog — they are not in the runtime path.
 
 ## [dictate.sh](dictate.sh)
 
@@ -44,3 +44,15 @@ The script prepends `/opt/homebrew/bin` to PATH at startup because Hammerspoon-s
 ### Size budget
 
 Soft cap 200 lines, currently ~100. Split triggers: a fourth subcommand, or a new pre/post-processing layer (e.g. LLM cleanup) that doesn't belong inline in `transcribe`.
+
+## [test-record-shutdown.sh](test-record-shutdown.sh)
+
+End-to-end test of `dictate.sh record` shutdown — reproduces what Hammerspoon does on PTT release without needing a keyboard. Four scenarios: `basic` (2s hold + SIGTERM), `rapid` (SIGTERM ~200ms after spawn), `no-orphans` (5 back-to-back cycles), `wav-duration` (3s hold preserves ≥2s of audio). Run after any change to `dictate.sh`. Override the mic with `AUDIO_DEVICE=:N`.
+
+## [test-transcribe-output.sh](test-transcribe-output.sh)
+
+Regression test against the `(B[m` ANSI prefix that leaked into pasted transcripts. Invokes `dictate.sh transcribe` two ways — directly and via `/bin/bash -c "…"` (Hammerspoon's `hs.execute` shape) — and asserts the output has no `\e` control bytes. Uses the bundled JFK fixture at `/opt/homebrew/share/whisper-cpp/jfk.wav`.
+
+## [monitor-ghosts.sh](monitor-ghosts.sh)
+
+Background watchdog that polls `pgrep` every 0.5s for `ffmpeg.*voice-dictate` and logs START/WAV/GONE transitions to `/tmp/voice-dictate-ghost-watch.log`. Designed to catch orphan ffmpegs in the wild during long dictation sessions — complementary to `test-record-shutdown.sh`'s automated coverage. Subcommands: `start | stop | status | tail | reset`.

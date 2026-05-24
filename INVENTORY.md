@@ -9,7 +9,7 @@ Master switchboard. Authoritative root map of the repository. Every entry is one
 - [SPEC.md](SPEC.md) — Locked v0.1 scope, architecture, configuration surface, dependencies, open questions.
 - [PLAN.md](PLAN.md) — Implementation steps with acceptance criteria and current status.
 - [INSTALL.md](INSTALL.md) — One-shot install, macOS permissions walkthrough, smoke-test path, uninstall.
-- [install.sh](install.sh) — Idempotent installer: verifies deps, prompts for runtime config, writes the two local config files, symlinks the Lua module, patches init.lua, reloads.
+- [install.sh](install.sh) — Idempotent installer: verifies deps, prompts for runtime config, writes the two local config files, symlinks both Lua modules, patches init.lua, reloads.
 - [LICENSE](LICENSE) — ISC license: usage, modification, and distribution terms.
 - [SECURITY.md](SECURITY.md) — Vulnerability reporting policy and supported versions.
 - [.gitignore](.gitignore) — Ignored paths: macOS metadata and the local shell config written by install.sh.
@@ -26,6 +26,9 @@ Settled engineering rules. Folder switchboard: [engineering/README.md](engineeri
 Shell-side recorder and transcriber. Leaf README: [bin/README.md](bin/README.md).
 
 - [bin/dictate.sh](bin/dictate.sh) — Three subcommands (record, transcribe, smoke). Spawned by Hammerspoon; standalone-runnable.
+- [bin/test-record-shutdown.sh](bin/test-record-shutdown.sh) — End-to-end test of record shutdown — SIGTERM forwarding, no orphan ffmpegs, WAV duration preserved.
+- [bin/test-transcribe-output.sh](bin/test-transcribe-output.sh) — Regression test asserting `transcribe` output is free of ANSI escape bytes, direct and via `bash -c`.
+- [bin/monitor-ghosts.sh](bin/monitor-ghosts.sh) — Background watchdog that logs ffmpeg-recording PID transitions to `/tmp/voice-dictate-ghost-watch.log`.
 
 ## [hammerspoon/](hammerspoon/)
 
