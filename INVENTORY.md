@@ -11,6 +11,7 @@ Master switchboard. Authoritative root map of the repository. Every entry is one
 - [LICENSE](LICENSE) — ISC license: usage, modification, and distribution terms.
 - [SECURITY.md](SECURITY.md) — Vulnerability reporting policy and supported versions.
 - [.gitignore](.gitignore) — Ignored paths: macOS metadata and the local shell config written by install.sh.
+- [.shellcheckrc](.shellcheckrc) — shellcheck project config: resolve `source` directives per-script so `shellcheck -x` works from any directory.
 
 ## [engineering/](engineering/)
 
