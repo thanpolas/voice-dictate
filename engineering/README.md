@@ -6,6 +6,7 @@ How voice-dictate is built. Settled engineering rules and the CDE model that org
 
 - [cde.md](cde.md) — Context-Driven Engineering: definition, operating rule, switchboard discipline.
 - [conventions.md](conventions.md) — System-wide conventions: file/function caps, naming, comments, markdown, commits, Lua and shell specifics.
+- [plans/](plans/) — Dated plan documents and frozen v0.1 spec; folder switchboard: [plans/README.md](plans/README.md).
 
 ## Principles driving the architecture
 

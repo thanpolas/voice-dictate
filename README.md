@@ -33,7 +33,7 @@ curl -L --progress-bar \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
 ```
 
-Other Whisper checkpoints work — set `MODEL_PATH` to your preferred file. See [SPEC.md § Transcription][spec-transcription] for the reasoning behind the default.
+Other Whisper checkpoints work — set `MODEL_PATH` to your preferred file. See the [v0.1 spec § Transcription][spec-transcription] for the reasoning behind the default.
 
 # Install
 
@@ -94,7 +94,7 @@ Re-running `./install.sh` is safe — prompts pre-fill with your current values.
 
 # Architecture
 
-Two processes glued by Hammerspoon. The Lua module owns hotkeys, the state machine, the menubar item, and paste; `dictate.sh` owns audio capture (ffmpeg) and transcription (whisper-cli). Full design and the boundary contract live in [SPEC.md][spec-md].
+Two processes glued by Hammerspoon. The Lua module owns hotkeys, the state machine, the menubar item, and paste; `dictate.sh` owns audio capture (ffmpeg) and transcription (whisper-cli). Full design and the boundary contract live in the [v0.1 spec][spec-md].
 
 # Engineering
 
@@ -118,8 +118,8 @@ Copyright © [Thanos Polychronakis][thanpolas] and Authors, [Licensed under ISC]
 [install-md]: INSTALL.md
 [dictate-sh]: bin/dictate.sh
 [lua-mod]: hammerspoon/voice-dictate.lua
-[spec-md]: SPEC.md
-[spec-transcription]: SPEC.md#transcription
+[spec-md]: engineering/plans/2026-05-20-v0.1-spec.md
+[spec-transcription]: engineering/plans/2026-05-20-v0.1-spec.md#transcription
 [cde-md]: engineering/cde.md
 [claude-md]: CLAUDE.md
 [inventory-md]: INVENTORY.md
