@@ -1,182 +1,143 @@
 #!/usr/bin/env bash
-# @fileoverview Idempotent installer for voice-dictate. Verifies dependencies,
-# prompts for runtime config, writes the shell + Hammerspoon config files,
-# symlinks the Lua module into ~/.hammerspoon, patches init.lua, reloads.
+# @fileoverview Idempotent installer for voice-dictate. Thin orchestrator over
+# the install/ helpers — verifies dependencies (prompting to install missing
+# ones via Homebrew), resolves a Whisper model (reusing one on disk or
+# downloading the default on consent), writes the two runtime config files,
+# wires Hammerspoon, and walks the user through the macOS permissions panes.
 #
-# Run from anywhere: `./install.sh` (uses BASH_SOURCE to resolve repo paths).
-# Re-runs are safe — prompts pre-fill from the existing config when present.
+# Subcommands:
+#   install (default) — run the full bootstrapper.
+#   update            — placeholder; tagged-release update flow lands in a follow-up PR.
 
 set -euo pipefail
 
-# ───── paths ────────────────────────────────────────────────────────────────
-
 # Absolute path to this repo's root, derived from the script location.
-readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Split declaration from assignment so the cd-subshell exit status is not masked.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly REPO_ROOT
 
-# Source Lua module shipped by this repo (main entry).
-readonly SRC_LUA="${REPO_ROOT}/hammerspoon/voice-dictate.lua"
+# Hammerspoon configuration directory in the user's home.
+readonly VD_HAMMERSPOON_DIR="${HOME}/.hammerspoon"
 
-# Sibling Lua module shipped alongside the main one (mic picker).
-# Lua's require() resolves siblings via ~/.hammerspoon's package.path, so it
-# must be symlinked next to voice-dictate.lua.
-readonly SRC_LUA_MIC="${REPO_ROOT}/hammerspoon/voice-dictate-mic.lua"
-
-# Destination symlink inside the user's Hammerspoon config directory.
-readonly DST_LUA="${HOME}/.hammerspoon/voice-dictate.lua"
-
-# Destination symlink for the mic-picker sibling module.
-readonly DST_LUA_MIC="${HOME}/.hammerspoon/voice-dictate-mic.lua"
+# Source Lua modules shipped by this repo; symlinked into the Hammerspoon dir.
+readonly VD_SRC_LUA_MAIN="${REPO_ROOT}/hammerspoon/voice-dictate.lua"
+readonly VD_SRC_LUA_MIC="${REPO_ROOT}/hammerspoon/voice-dictate-mic.lua"
 
 # User's Hammerspoon entry point — patched to require the voice-dictate module.
-readonly INIT_LUA="${HOME}/.hammerspoon/init.lua"
+readonly VD_INIT_LUA="${VD_HAMMERSPOON_DIR}/init.lua"
 
-# Single line appended to init.lua; checked verbatim to keep the patch idempotent.
-readonly LOADER_LINE='require("voice-dictate").start()'
+# Runtime config files written by the installer; both required by the tool.
+readonly VD_SHELL_CONFIG="${REPO_ROOT}/bin/config.local.sh"
+readonly VD_LUA_CONFIG="${VD_HAMMERSPOON_DIR}/voice-dictate-config.lua"
 
-# Local config files written by this installer — both are required at runtime.
-readonly SHELL_CONFIG="${REPO_ROOT}/bin/config.local.sh"
-readonly LUA_CONFIG="${HOME}/.hammerspoon/voice-dictate-config.lua"
+# Project-local artifact store; install.sh creates it on first run.
+readonly VD_LOCAL_MODELS_DIR="${REPO_ROOT}/.local/models"
 
-# Project defaults — used by the prompts when there is no prior config.
-readonly DEFAULT_MODEL="${HOME}/whisper-models/ggml-large-v3-turbo-q5_0.bin"
-readonly DEFAULT_LANGUAGE="el"
+# Default model filename, used when downloading and as the fallback destination.
+readonly VD_DEFAULT_MODEL_FILENAME="ggml-large-v3-turbo-q5_0.bin"
 
-# ───── helpers ──────────────────────────────────────────────────────────────
+# Default language for the Whisper transcription — Greek primary per spec.
+readonly VD_DEFAULT_LANGUAGE="el"
 
-# Abort with message on stderr if a required command is missing.
-function require_cmd() {
-  local cmd="${1}"
-  if ! command -v "${cmd}" >/dev/null 2>&1; then
-    echo "install: missing required command: ${cmd}" >&2
-    exit 1
-  fi
-}
+# Source every helper so their public functions are in scope. lib.sh is
+# transitively sourced by each helper; its colour constants are reload-safe.
+# shellcheck source=install/deps.sh
+source "${REPO_ROOT}/install/deps.sh"
+# shellcheck source=install/model.sh
+source "${REPO_ROOT}/install/model.sh"
+# shellcheck source=install/config.sh
+source "${REPO_ROOT}/install/config.sh"
+# shellcheck source=install/hammerspoon.sh
+source "${REPO_ROOT}/install/hammerspoon.sh"
+# shellcheck source=install/permissions.sh
+source "${REPO_ROOT}/install/permissions.sh"
 
-# Verify every external dependency before mutating anything on disk.
-function verify_deps() {
-  require_cmd ffmpeg
-  require_cmd whisper-cli
-  if [[ ! -d "/Applications/Hammerspoon.app" ]]; then
-    echo "install: Hammerspoon.app not found in /Applications" >&2
-    exit 1
-  fi
-}
-
-# Prompt the user with a default; print the chosen value to stdout.
-# Uses bash read -p, which writes the prompt to stderr — safe inside $(…).
-function ask() {
-  local prompt="${1}"
-  local default="${2}"
-  local answer
-  read -r -p "${prompt} [${default}]: " answer
-  echo "${answer:-${default}}"
-}
-
-# Write bin/config.local.sh with the chosen MODEL_PATH and LANGUAGE plus
-# the technical defaults that almost nobody needs to tune (THREADS, AUDIO_DEVICE).
-function write_shell_config() {
-  local model_path="${1}"
-  local language="${2}"
-  cat > "${SHELL_CONFIG}" <<EOF
-# voice-dictate shell config — generated by install.sh; gitignored.
-# Edit to change defaults. Per-invocation env overrides still work:
-#   LANGUAGE=en ./bin/dictate.sh smoke
-
-: "\${MODEL_PATH:=${model_path}}"
-: "\${LANGUAGE:=${language}}"
-: "\${THREADS:=8}"
-: "\${AUDIO_DEVICE:=:0}"
-EOF
-  echo "install: wrote ${SHELL_CONFIG}"
-}
-
-# Write ~/.hammerspoon/voice-dictate-config.lua with the absolute path to
-# dictate.sh plus the hotkey + flush-delay defaults. Loaded by the Lua module
-# via require("voice-dictate-config") on every Hammerspoon reload.
-function write_lua_config() {
-  mkdir -p "${HOME}/.hammerspoon"
-  cat > "${LUA_CONFIG}" <<EOF
--- voice-dictate Hammerspoon config — generated by install.sh.
--- Edit to change defaults, then run hs.reload() from the Hammerspoon Console.
-
-return {
-  dictate_sh = "${REPO_ROOT}/bin/dictate.sh",
-  toggle_mods = {"cmd", "shift"},
-  toggle_key = "D",
-  right_alt_keycode = 61,
-  flush_delay_s = 0.2,
-}
-EOF
-  echo "install: wrote ${LUA_CONFIG}"
-}
-
-# Symlink the Lua modules into ~/.hammerspoon, overwriting any prior links.
-# Both files must live in ~/.hammerspoon for Lua's require() to find the sibling.
-function link_module() {
-  mkdir -p "${HOME}/.hammerspoon"
-  ln -sf "${SRC_LUA}" "${DST_LUA}"
-  echo "install: linked ${DST_LUA} -> ${SRC_LUA}"
-  ln -sf "${SRC_LUA_MIC}" "${DST_LUA_MIC}"
-  echo "install: linked ${DST_LUA_MIC} -> ${SRC_LUA_MIC}"
-}
-
-# Append the loader line to init.lua if it isn't already present.
-function patch_init_lua() {
-  if [[ -f "${INIT_LUA}" ]] && grep -Fq "${LOADER_LINE}" "${INIT_LUA}"; then
-    echo "install: init.lua already requires voice-dictate — skipping patch"
+# Read MODEL_PATH and LANGUAGE from an existing config.local.sh, if any.
+# Echoes "model|language" so the orchestrator can split it; empty fields when
+# the config does not exist or does not set the value.
+function read_existing_config() {
+  if [[ ! -f "${VD_SHELL_CONFIG}" ]]; then
+    echo "|"
     return 0
   fi
-  printf '\n-- voice-dictate (installed by voice-dictate/install.sh)\n%s\n' \
-    "${LOADER_LINE}" >> "${INIT_LUA}"
-  echo "install: patched ${INIT_LUA}"
+  # shellcheck source=/dev/null
+  source "${VD_SHELL_CONFIG}"
+  echo "${MODEL_PATH:-}|${LANGUAGE:-}"
 }
 
-# Trigger Hammerspoon to reload its config without restarting the app.
-function reload_hammerspoon() {
-  open -g "hammerspoon://reload"
-  echo "install: requested Hammerspoon reload"
-}
-
-# Print a warning (not a fatal error) when the chosen model is not on disk.
-function warn_if_missing_model() {
-  local model_path="${1}"
-  if [[ ! -f "${model_path}" ]]; then
-    echo "install: warning — model file not found at ${model_path}." >&2
-    echo "         download it before first use; see README.md § Model download." >&2
+# Detect a Homebrew package by command name; install it on consent if missing.
+# Wraps the install_dep helper with a per-package presence check so the prompt
+# only fires when the user actually needs to act.
+# $1 — command name to probe for presence.
+# $2 — Homebrew package name to install if absent.
+# $3 — package type, "formula" or "cask".
+# $4 — human-readable description shown in the consent prompt.
+function ensure_brew_dep_by_command() {
+  if command -v "${1}" >/dev/null 2>&1; then
+    return 0
   fi
+  install_dep "${2}" "${3}" "${4}"
 }
 
-# ───── entry point ──────────────────────────────────────────────────────────
+# Run the full install flow. Idempotent — re-runs detect existing state and
+# skip work that is already done.
+function cmd_install() {
+  log info "voice-dictate installer starting"
 
-function main() {
-  verify_deps
-
-  # Determine config values. If a prior shell config exists, source it so
-  # MODEL_PATH and LANGUAGE pre-fill the prompts with the user's saved values.
-  local cur_model="${DEFAULT_MODEL}"
-  local cur_language="${DEFAULT_LANGUAGE}"
-  if [[ -f "${SHELL_CONFIG}" ]]; then
-    # shellcheck source=/dev/null
-    source "${SHELL_CONFIG}"
-    cur_model="${MODEL_PATH:-${cur_model}}"
-    cur_language="${LANGUAGE:-${cur_language}}"
+  if ! verify_brew; then
+    bootstrap_brew
   fi
+  ensure_brew_dep_by_command ffmpeg ffmpeg formula "Audio capture (FFmpeg)"
+  ensure_brew_dep_by_command whisper-cli whisper-cpp formula "Whisper transcription CLI"
+  if [[ ! -d "/Applications/Hammerspoon.app" ]]; then
+    install_dep hammerspoon cask "macOS automation framework (Hammerspoon)"
+  fi
+
+  local prior model_default language_default
+  prior="$(read_existing_config)"
+  model_default="${prior%|*}"
+  language_default="${prior##*|}"
+  : "${model_default:=${VD_LOCAL_MODELS_DIR}/${VD_DEFAULT_MODEL_FILENAME}}"
+  : "${language_default:=${VD_DEFAULT_LANGUAGE}}"
 
   echo
-  echo "voice-dictate config — press Enter to accept defaults."
-  local cfg_model
-  cfg_model="$(ask "Whisper model path" "${cur_model}")"
-  local cfg_language
-  cfg_language="$(ask "Default language (el, en, auto, …)" "${cur_language}")"
+  log info "voice-dictate config — press Enter to accept defaults"
+  local cfg_model cfg_language
+  cfg_model="$(ask "Whisper model path" "${model_default}")"
+  cfg_language="$(ask "Default language (el, en, auto, …)" "${language_default}")"
 
-  warn_if_missing_model "${cfg_model}"
+  local resolved_model
+  resolved_model="$(ensure_model "${cfg_model}" "${VD_LOCAL_MODELS_DIR}/${VD_DEFAULT_MODEL_FILENAME}")"
 
-  write_shell_config "${cfg_model}" "${cfg_language}"
-  write_lua_config
-  link_module
-  patch_init_lua
+  write_shell_config "${VD_SHELL_CONFIG}" "${resolved_model}" "${cfg_language}"
+  write_lua_config "${VD_LUA_CONFIG}" "${REPO_ROOT}/bin/dictate.sh"
+  link_modules "${VD_SRC_LUA_MAIN}" "${VD_SRC_LUA_MIC}" "${VD_HAMMERSPOON_DIR}"
+  patch_init_lua "${VD_INIT_LUA}"
   reload_hammerspoon
-  echo "install: done. Grant Accessibility + Microphone to Hammerspoon if prompted."
+
+  echo
+  walk_permissions
+
+  echo
+  log ok "voice-dictate installed. Hotkeys: Right Option (PTT), Cmd+Shift+D (toggle)."
+}
+
+# Placeholder for the tagged-release update flow; real logic lands in the
+# follow-up PR per D7 of the install UX bootstrap plan.
+function cmd_update() {
+  log warn "'update' is not yet implemented — coming in a follow-up release."
+  log warn "For now: git pull && ./install.sh re-runs the bootstrapper idempotently."
+  exit 0
+}
+
+# Dispatch subcommand. Default is 'install' when no argument is given.
+function main() {
+  local subcommand="${1:-install}"
+  case "${subcommand}" in
+    install) cmd_install ;;
+    update)  cmd_update ;;
+    *) log error "unknown subcommand: ${subcommand}"; exit 1 ;;
+  esac
 }
 
 main "$@"
