@@ -12,9 +12,9 @@ brew install --cask hammerspoon
 Model — `large-v3-turbo-q5_0` quantized (547 MB):
 
 ```bash
-mkdir -p ~/tiktok/whisper-models
+mkdir -p ~/whisper-models
 curl -L --progress-bar \
-  -o ~/tiktok/whisper-models/ggml-large-v3-turbo-q5_0.bin \
+  -o ~/whisper-models/ggml-large-v3-turbo-q5_0.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
 ```
 
