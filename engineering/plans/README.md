@@ -6,6 +6,7 @@ Naming: `YYYY-MM-DD-slug.md`. The date is the day the plan was opened, not when 
 
 ## Contents
 
+- [2026-05-25-install-ux-bootstrap.md](2026-05-25-install-ux-bootstrap.md) — Install UX rethink: delete INSTALL.md, turn install.sh into a true bootstrapper, decide distribution path.
 - [2026-05-20-v0.1-spec.md](2026-05-20-v0.1-spec.md) — Locked v0.1 spec: scope, architecture, configuration surface, dependencies, open questions.
 - [2026-05-20-v0.1-implementation.md](2026-05-20-v0.1-implementation.md) — Original v0.1 implementation order: dictate.sh → Lua module → install.sh → READMEs → e2e.
 
