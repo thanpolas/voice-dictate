@@ -1,11 +1,12 @@
 # hammerspoon — Lua module
 
-Two Lua files loaded by the user's `~/.hammerspoon/init.lua`. Own the macOS-side concerns: hotkeys, recording state, menubar, paste, mic selection. Delegate audio capture and transcription to [bin/dictate.sh](../bin/dictate.sh).
+Three Lua files loaded via the user's `~/.hammerspoon/init.lua` (which requires the main module). Own the macOS-side concerns: hotkeys, recording state, the menubar command center, paste, mic selection. Delegate audio capture and transcription to [bin/dictate.sh](../bin/dictate.sh).
 
-- [voice-dictate.lua](voice-dictate.lua) — main entry. Hotkeys, state machine, menubar, paste.
-- [voice-dictate-mic.lua](voice-dictate-mic.lua) — mic picker. Scans avfoundation inputs, persists choice via `hs.settings`, builds the menubar dropdown.
+- [voice-dictate.lua](voice-dictate.lua) — main entry. Hotkeys, state machine, recording, paste.
+- [voice-dictate-menu.lua](voice-dictate-menu.lua) — menubar command center: the idle icon, the dropdown, the recording title, the spinner.
+- [voice-dictate-mic.lua](voice-dictate-mic.lua) — mic picker. Scans avfoundation inputs, persists choice via `hs.settings`, builds the Microphone submenu.
 
-Both files must live in `~/.hammerspoon/` so Lua's `require()` can resolve the sibling — `install.sh` symlinks both.
+All three files must live in `~/.hammerspoon/` so Lua's `require()` can resolve the siblings — `install.sh` symlinks every `hammerspoon/*.lua`.
 
 ## [voice-dictate.lua](voice-dictate.lua)
 
@@ -13,7 +14,7 @@ Both files must live in `~/.hammerspoon/` so Lua's `require()` can resolve the s
 
 ```lua
 local m = require("voice-dictate")
-m.start()  -- bind hotkeys, mount menubar (idempotent — calls stop() first)
+m.start()  -- bind hotkeys, mount the command center (idempotent — calls stop() first)
 m.stop()   -- tear down everything (safe to call repeatedly; used by hs.reload)
 ```
 
@@ -47,6 +48,7 @@ Sourced from `~/.hammerspoon/voice-dictate-config.lua`, written by `install.sh`.
 | `toggle_key` | `"D"` | Key paired with the toggle modifiers. |
 | `right_alt_keycode` | `61` | Filters the flagsChanged eventtap. Left Option is `58`. |
 | `flush_delay_s` | `0.2` | Delay after SIGTERM before reading the WAV. Bump if recordings look truncated. |
+| `hide_hammerspoon_icon` | `true` | Hide Hammerspoon's own menu icon so the Dikta item is the sole control surface. Set `false` to keep it. |
 
 ### Failure modes
 
@@ -57,6 +59,37 @@ Sourced from `~/.hammerspoon/voice-dictate-config.lua`, written by `install.sh`.
 ### Reload safety
 
 `M.start()` calls `M.stop()` first, so `hs.reload()` is always safe. Eventtaps, hotkeys, menubar item, and any in-flight record task are all torn down before re-binding. No accumulation across reloads.
+
+## [voice-dictate-menu.lua](voice-dictate-menu.lua)
+
+The menubar command center — the single control surface. `M.start()` hides Hammerspoon's own menu icon (config key `hide_hammerspoon_icon`, default true), so this dropdown also surfaces the two Hammerspoon functions that icon would otherwise provide.
+
+### Dropdown
+
+```
+Dikta — Idle / Recording… / Transcribing…   (status header, disabled)
+────────────
+Start / Stop Dictation       ⌘⇧D
+────────────
+Microphone ▸                 (live-rescan mic picker submenu)
+────────────
+Open Console                 → hs.openConsole()
+Reload Config                → hs.reload()
+────────────
+Show Hammerspoon Menu Icon   → hs.menuIcon(true)
+```
+
+Registered as a callback, so it re-reads recording/transcribing state and re-scans mics on every open. Driven by a control table injected from the main module (`onToggle`, `isRecording`, `onOpenConsole`, `onReload`, `onShowHsIcon`, `hotkeyHint`, `hideHsIcon`) — no circular `require` back into the main module.
+
+### Menubar states
+
+- **Idle** — the Dikta spoken-mark, rendered in code via `hs.canvas` → `imageFromCanvas()` → `setIcon(image, true)` (template, so macOS auto-inverts for light/dark). Geometry mirrors [../brand/dikta-mark.svg](../brand/dikta-mark.svg). Falls back to the `○` text glyph if the canvas image fails.
+- **Recording** — `● REC` title, icon cleared.
+- **Transcribing** — the braille spinner (`⠋⠙⠹…`, 80ms), title-based, icon cleared.
+
+### Hiding Hammerspoon's icon — recovery path
+
+Hiding Hammerspoon's menu icon removes the usual access to its Console and Preferences. The dropdown's **Show Hammerspoon Menu Icon** restores it for the session, but `hs.reload()` re-hides it (the icon is re-asserted on every `M.start()`). To keep it permanently, set `hide_hammerspoon_icon = false` in `voice-dictate-config.lua`. If the module ever mounts but its own item disappears, re-enable the icon from Hammerspoon's Preferences (Spotlight → Hammerspoon) or run `hs.menuIcon(true)` in the Console.
 
 ## [voice-dictate-mic.lua](voice-dictate-mic.lua)
 
@@ -84,4 +117,4 @@ mic.buildMicMenu()     -- builds menu items for hs.menubar:setMenu(); rescans on
 
 ### Size budget
 
-Both files soft-capped at 250 lines per file (CLAUDE.md's 200 soft / 300 hard applies). Main module currently ~210, mic ~95. Future split triggers: visual feedback layer (canvas), per-app behavior, or English-dedicated hotkey would each justify another sibling file.
+CLAUDE.md's 200 soft / 300 hard line cap applies per file. The command-center extraction moved all menubar presentation out of the main module into [voice-dictate-menu.lua](voice-dictate-menu.lua), keeping each module under the cap. Future split triggers: an on-pointer cursor loader, cursor-lock async paste, or streaming transcription would each justify another sibling file.

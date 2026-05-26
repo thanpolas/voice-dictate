@@ -34,8 +34,9 @@ Shell-side recorder and transcriber. Leaf README: [bin/README.md](bin/README.md)
 
 Lua module loaded from the user's `~/.hammerspoon/init.lua`. Leaf README: [hammerspoon/README.md](hammerspoon/README.md).
 
-- [hammerspoon/voice-dictate.lua](hammerspoon/voice-dictate.lua) — Hotkey handlers, state machine, menubar, paste. Public API: `M.start()` / `M.stop()`.
-- [hammerspoon/voice-dictate-mic.lua](hammerspoon/voice-dictate-mic.lua) — Mic picker: avfoundation device scan, menubar dropdown, NSUserDefaults persistence.
+- [hammerspoon/voice-dictate.lua](hammerspoon/voice-dictate.lua) — Hotkey handlers, state machine, recording, paste. Public API: `M.start()` / `M.stop()`.
+- [hammerspoon/voice-dictate-menu.lua](hammerspoon/voice-dictate-menu.lua) — Menubar command center: idle icon, dropdown, recording title, spinner; hides Hammerspoon's icon.
+- [hammerspoon/voice-dictate-mic.lua](hammerspoon/voice-dictate-mic.lua) — Mic picker: avfoundation device scan, Microphone submenu, NSUserDefaults persistence.
 
 ## [brand/](brand/)
 
