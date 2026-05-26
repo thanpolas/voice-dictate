@@ -6,8 +6,6 @@ Master switchboard. Authoritative root map of the repository. Every entry is one
 
 - [README.md](README.md) — Public-facing overview: prerequisites, install, usage, configuration, architecture, engineering, license.
 - [CLAUDE.md](CLAUDE.md) — Engineering entry point: CDE, hard principles, comments, markdown, naming, commits.
-- [SPEC.md](SPEC.md) — Locked v0.1 scope, architecture, configuration surface, dependencies, open questions.
-- [PLAN.md](PLAN.md) — Implementation steps with acceptance criteria and current status.
 - [INSTALL.md](INSTALL.md) — One-shot install, macOS permissions walkthrough, smoke-test path, uninstall.
 - [install.sh](install.sh) — Idempotent installer: verifies deps, prompts for runtime config, writes the two local config files, symlinks both Lua modules, patches init.lua, reloads.
 - [LICENSE](LICENSE) — ISC license: usage, modification, and distribution terms.
@@ -20,6 +18,7 @@ Settled engineering rules. Folder switchboard: [engineering/README.md](engineeri
 
 - [engineering/cde.md](engineering/cde.md) — Context-Driven Engineering definition, operating rule, switchboard discipline.
 - [engineering/conventions.md](engineering/conventions.md) — File/function caps, naming, comments, markdown, commits, Lua and shell specifics.
+- [engineering/plans/](engineering/plans/) — Dated plan documents and frozen v0.1 spec; folder switchboard: [engineering/plans/README.md](engineering/plans/README.md).
 
 ## [bin/](bin/)
 

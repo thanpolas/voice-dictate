@@ -4,10 +4,10 @@ Settled engineering rules for this repo. Nothing here is per-task negotiable. If
 
 ## Spec ground rules
 
-- One subject per spec doc. [`SPEC.md`][spec-md] owns scope and architecture; [`PLAN.md`][plan-md] owns ordering and acceptance criteria; folder READMEs own folder context.
-- A spec is **settled** when it has no implicit open questions that would materially change the implementation. Explicitly deferred decisions are fine — flag them in the doc that owns them.
-- Specs are living documents — they change when requirements change, and they change in the same session as the implementation, not after.
-- The process is **Spec → Plan → Implement**, in that order. No stage is skipped for non-trivial work.
+- Scope and architecture decisions live in dated plan files under [`engineering/plans/`][plans-readme]. One body of work per plan; folder READMEs own folder context.
+- A plan is **settled** when it has no implicit open questions that would materially change the implementation. Explicitly deferred decisions are fine — flag them in the plan itself.
+- Plans are immutable once shipped — they are the durable record of what was decided when. Subsequent scope changes open a new dated plan that names the prior plan it extends or supersedes.
+- The process is **Spec → Plan → Implement**, in that order. No stage is skipped for non-trivial work. In practice the "spec" lives inside the dated plan that owns the work.
 
 ## File and function size
 
@@ -147,7 +147,6 @@ For bugs on the non-testable surface — audio I/O, Hammerspoon Lua, hotkey hand
 - If the same logic appears in 3+ places, extract it. Two similar-looking blocks with different purposes are not duplicates.
 - Three similar lines is better than a premature abstraction.
 
-[spec-md]: ../SPEC.md
-[plan-md]: ../PLAN.md
+[plans-readme]: plans/README.md
 [cde-md]: cde.md
 [conventional-commits]: https://www.conventionalcommits.org/

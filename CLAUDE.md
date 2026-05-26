@@ -32,11 +32,11 @@ Switchboards exist at every level — root `INVENTORY.md` and any folder README 
 | **A4 — Smoke-test pure paths** | `dictate.sh transcribe` and any pure helper get smoke coverage. Audio I/O and Hammerspoon Lua are manually verified. | [`engineering/conventions.md`][conventions-md] |
 | **A8 — Spec → Plan → Implement** | No non-trivial implementation begins without a settled spec and a plan. | [`engineering/conventions.md`][conventions-md] |
 
-## Living documents
+## Dated plans
 
-[`SPEC.md`][spec-md] and [`PLAN.md`][plan-md] are not written once. They update as the system is built. When an implementation decision deviates from or extends a spec, the relevant spec file is updated in the same session.
+Scope, architecture decisions, and implementation order all live in dated plan files under [`engineering/plans/`][plans-readme]. Each plan is `YYYY-MM-DD-slug.md`, owns one body of work, and stays in the tree as the durable record once the work ships. The locked v0.1 spec is frozen there as a historical reference; subsequent scope changes are new dated plans rather than edits to old ones.
 
-Spec drift — where code and spec diverge — is a critical failure in CDE. It breaks every future session.
+Spec drift — where code and the most recent applicable plan diverge — is a critical failure in CDE. It breaks every future session. When implementation deviates from the plan that authorised it, open a new dated plan in the same change.
 
 ## Comments and docblocks
 
@@ -72,6 +72,5 @@ Full rules: [`engineering/conventions.md`][conventions-md] § Comments and docbl
 [conventions-md]: engineering/conventions.md
 [bin-readme]: bin/README.md
 [hammerspoon-readme]: hammerspoon/README.md
-[spec-md]: SPEC.md
-[plan-md]: PLAN.md
+[plans-readme]: engineering/plans/README.md
 [conventional-commits]: https://www.conventionalcommits.org/

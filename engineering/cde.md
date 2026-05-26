@@ -60,7 +60,7 @@ A **leaf README** — one that owns a folder's content rather than indexing sibl
 ### Where the detail lives
 
 - **Leaf folder READMEs** — own the content for their area: responsibilities, contracts, constants, constraints, sub-file lists.
-- **[`SPEC.md`][spec-md] and [`PLAN.md`][plan-md]** — own cross-cutting scope, architecture, sequencing.
+- **Dated plans under [`engineering/plans/`][plans-readme]** — own cross-cutting scope, architecture, sequencing. One body of work per plan; one plan per decision.
 - **Switchboards (any level)** — only point; never describe. If you find yourself wanting to add a second sentence, the content belongs one click down.
 
 ### Audit cadence
@@ -78,5 +78,4 @@ Switchboard bloat is silent context leakage. Every session loads the root invent
 [engineering-readme]: README.md
 [bin-readme]: ../bin/README.md
 [hammerspoon-readme]: ../hammerspoon/README.md
-[spec-md]: ../SPEC.md
-[plan-md]: ../PLAN.md
+[plans-readme]: plans/README.md
