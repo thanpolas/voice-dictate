@@ -1,2 +1,3 @@
 .DS_Store
 bin/config.local.sh
+.local/
