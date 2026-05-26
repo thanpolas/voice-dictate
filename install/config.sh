@@ -51,6 +51,7 @@ return {
   toggle_key = "D",
   right_alt_keycode = 61,
   flush_delay_s = 0.2,
+  hide_hammerspoon_icon = true,
 }
 EOF
   log ok "wrote ${destination}"
