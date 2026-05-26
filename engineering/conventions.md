@@ -125,7 +125,15 @@ Rules:
 - Imperative mood in the description ("add", "fix", "change" — not "added", "fixes", "changed").
 - First line under **72 characters**.
 - Description explains **why**, not just what.
-- One logical change per commit — do not bundle unrelated changes.
+
+## Atomic commits
+
+**One logical change per commit. Never bundle, even when changes are tightly coupled in time.**
+
+- Identify the logical units of change before writing any commit. Each unit is one commit.
+- Sequence commits so each one leaves the repo in a coherent state — no broken links between docs, no contradictions between code and adjacent docs, no half-state.
+- If two changes feel inseparable, the answer is **sequencing**, not bundling. Often: ship the new thing first; in the next commit, remove the thing it obsoletes; in the next, update cross-references.
+- "Tightly related" is not a licence to bundle. Refactors, doc changes, dependency bumps, and test additions each get their own commit even when they support a feature shipping in the same session.
 
 ## No commits without explicit instruction
 
