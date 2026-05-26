@@ -19,9 +19,9 @@ readonly REPO_ROOT
 # Hammerspoon configuration directory in the user's home.
 readonly VD_HAMMERSPOON_DIR="${HOME}/.hammerspoon"
 
-# Source Lua modules shipped by this repo; symlinked into the Hammerspoon dir.
-readonly VD_SRC_LUA_MAIN="${REPO_ROOT}/hammerspoon/voice-dictate.lua"
-readonly VD_SRC_LUA_MIC="${REPO_ROOT}/hammerspoon/voice-dictate-mic.lua"
+# Source directory of Lua modules shipped by this repo; every *.lua here is
+# symlinked into the Hammerspoon dir, so new modules need no change here.
+readonly VD_SRC_LUA_DIR="${REPO_ROOT}/hammerspoon"
 
 # User's Hammerspoon entry point — patched to require the voice-dictate module.
 readonly VD_INIT_LUA="${VD_HAMMERSPOON_DIR}/init.lua"
@@ -111,7 +111,7 @@ function cmd_install() {
 
   write_shell_config "${VD_SHELL_CONFIG}" "${resolved_model}" "${cfg_language}"
   write_lua_config "${VD_LUA_CONFIG}" "${REPO_ROOT}/bin/dictate.sh"
-  link_modules "${VD_SRC_LUA_MAIN}" "${VD_SRC_LUA_MIC}" "${VD_HAMMERSPOON_DIR}"
+  link_modules "${VD_SRC_LUA_DIR}" "${VD_HAMMERSPOON_DIR}"
   patch_init_lua "${VD_INIT_LUA}"
   reload_hammerspoon
 
