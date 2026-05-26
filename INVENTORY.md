@@ -37,6 +37,14 @@ Lua module loaded from the user's `~/.hammerspoon/init.lua`. Leaf README: [hamme
 - [hammerspoon/voice-dictate.lua](hammerspoon/voice-dictate.lua) — Hotkey handlers, state machine, menubar, paste. Public API: `M.start()` / `M.stop()`.
 - [hammerspoon/voice-dictate-mic.lua](hammerspoon/voice-dictate-mic.lua) — Mic picker: avfoundation device scan, menubar dropdown, NSUserDefaults persistence.
 
+## [brand/](brand/)
+
+Dikta visual identity assets — collateral for docs and web, not loaded by the running tool. Leaf README: [brand/README.md](brand/README.md).
+
+- [brand/README.md](brand/README.md) — Brand assets and usage: the spoken-mark, the Ink badge, the palette, and PNG regeneration.
+- [brand/dikta-mark.svg](brand/dikta-mark.svg) — The Dikta spoken-mark (monochrome, transparent); source for dikta-mark.png.
+- [brand/dikta-badge.svg](brand/dikta-badge.svg) — The mark on an Ink rounded-rect badge; source for dikta-badge.png.
+
 ## [install/](install/)
 
 Bootstrapper helpers sourced by the top-level `install.sh`. Stubs today; behaviour lands per the dated plan. Folder switchboard: [install/README.md](install/README.md).
