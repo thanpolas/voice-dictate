@@ -19,8 +19,7 @@ You are starting a new voice-dictate session. Execute the following steps in ord
 
 ## Step 4 — Load current product state
 
-- [SPEC.md](../../SPEC.md) — current scope, architecture, open questions.
-- [PLAN.md](../../PLAN.md) — implementation steps and current status (`[ ]` vs `[x]`).
+- [engineering/plans/README.md](../../engineering/plans/README.md) — switchboard for dated plans and the frozen v0.1 spec. Read it, then open the most recent plan plus any older plan referenced by the task at hand.
 - Folder README for any area implied by the task — [bin/README.md](../../bin/README.md) for shell work, [hammerspoon/README.md](../../hammerspoon/README.md) for Lua work.
 
 ## Step 5 — CDE compliance check
@@ -37,7 +36,7 @@ Verify [INVENTORY.md](../../INVENTORY.md) is current:
 Output a concise briefing with:
 
 - **Context loaded** — bullet list of every file read.
-- **Current PLAN status** — which step is next per the `[ ]` / `[x]` markers in PLAN.md.
+- **Active plan** — name the most recent dated plan in `engineering/plans/`, state whether it has open questions or is settled, and call out anything the user should know before picking up work.
 - **CDE status** — either "INVENTORY.md is current" or what was out of date and what you fixed.
 - **Ready** — confirm orientation and ask: "What are we working on?"
 
