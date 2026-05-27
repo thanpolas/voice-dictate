@@ -11,6 +11,7 @@ Master switchboard. Authoritative root map of the repository. Every entry is one
 - [LICENSE](LICENSE) — ISC license: usage, modification, and distribution terms.
 - [SECURITY.md](SECURITY.md) — Vulnerability reporting policy and supported versions.
 - [.gitignore](.gitignore) — Ignored paths: macOS metadata and the local shell config written by install.sh.
+- [.shellcheckrc](.shellcheckrc) — shellcheck project config: resolve `source` directives per-script so `shellcheck -x` works from any directory.
 
 ## [engineering/](engineering/)
 
@@ -33,8 +34,17 @@ Shell-side recorder and transcriber. Leaf README: [bin/README.md](bin/README.md)
 
 Lua module loaded from the user's `~/.hammerspoon/init.lua`. Leaf README: [hammerspoon/README.md](hammerspoon/README.md).
 
-- [hammerspoon/voice-dictate.lua](hammerspoon/voice-dictate.lua) — Hotkey handlers, state machine, menubar, paste. Public API: `M.start()` / `M.stop()`.
-- [hammerspoon/voice-dictate-mic.lua](hammerspoon/voice-dictate-mic.lua) — Mic picker: avfoundation device scan, menubar dropdown, NSUserDefaults persistence.
+- [hammerspoon/voice-dictate.lua](hammerspoon/voice-dictate.lua) — Hotkey handlers, state machine, recording, paste. Public API: `M.start()` / `M.stop()`.
+- [hammerspoon/voice-dictate-menu.lua](hammerspoon/voice-dictate-menu.lua) — Menubar command center: idle icon, dropdown, recording title, spinner; hides Hammerspoon's icon.
+- [hammerspoon/voice-dictate-mic.lua](hammerspoon/voice-dictate-mic.lua) — Mic picker: avfoundation device scan, Microphone submenu, NSUserDefaults persistence.
+
+## [brand/](brand/)
+
+Dikta visual identity assets — collateral for docs and web, not loaded by the running tool. Leaf README: [brand/README.md](brand/README.md).
+
+- [brand/README.md](brand/README.md) — Brand assets and usage: the spoken-mark, the Ink badge, the palette, and PNG regeneration.
+- [brand/dikta-mark.svg](brand/dikta-mark.svg) — The Dikta spoken-mark (monochrome, transparent); source for dikta-mark.png.
+- [brand/dikta-badge.svg](brand/dikta-badge.svg) — The mark on an Ink rounded-rect badge; source for dikta-badge.png.
 
 ## [install/](install/)
 
