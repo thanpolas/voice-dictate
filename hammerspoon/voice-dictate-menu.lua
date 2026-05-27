@@ -52,18 +52,22 @@ local spinnerTimer = nil
 -- ───── idle icon ──────────────────────────────────────────────────────────────
 
 --- Render the Dikta spoken-mark — a voice-dot resolving into two text-strokes —
---- as a template image for the menubar. Opaque black fills; setIcon's template
---- flag makes macOS auto-invert for light/dark menubars. Geometry mirrors
---- brand/dikta-mark.svg. Returns nil if hs.canvas is unavailable.
---- @return hs.image|nil The 18×18 template icon, or nil on failure.
+--- as a template image for the menubar. macOS draws the status-item image at
+--- its native point size (it does NOT scale to the bar height), so the canvas
+--- is sized to ~bar height — the brand geometry scaled ×3 — for the mark to
+--- fill the bar instead of rendering tiny. Opaque black fills; setIcon's
+--- template flag makes macOS auto-invert for light/dark. Proportions match
+--- brand/dikta-mark.svg (scaled ×2.5 to sit just under the bar height, in line
+--- with neighbouring icons). Returns nil if hs.canvas is unavailable.
+--- @return hs.image|nil The template icon, or nil on failure.
 local function buildIdleIcon()
   if not hs.canvas then return nil end
-  local c = hs.canvas.new({x = 0, y = 0, w = 18, h = 18})
-  c[1] = {type = "circle", center = {x = 5, y = 9}, radius = 2.5,
+  local c = hs.canvas.new({x = 0, y = 0, w = 35, h = 15})
+  c[1] = {type = "circle", center = {x = 7.5, y = 7.5}, radius = 6.25,
           action = "fill", fillColor = {white = 0, alpha = 1}}
-  c[2] = {type = "rectangle", frame = {x = 9.5, y = 6.7, w = 6, h = 1.6},
+  c[2] = {type = "rectangle", frame = {x = 18.75, y = 1.75, w = 15, h = 4},
           action = "fill", fillColor = {white = 0, alpha = 1}}
-  c[3] = {type = "rectangle", frame = {x = 9.5, y = 9.7, w = 4, h = 1.6},
+  c[3] = {type = "rectangle", frame = {x = 18.75, y = 9.25, w = 10, h = 4},
           action = "fill", fillColor = {white = 0, alpha = 1}}
   local img = c:imageFromCanvas()
   c:delete()
