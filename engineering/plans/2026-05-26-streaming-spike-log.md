@@ -66,6 +66,45 @@ Until the user runs Spike 2, the blocklist ships with the three documented-by-de
 
 The plan's [§ Risks][plan-risks] flags this as the ugliest divergence case. Spike 2's manual test: start `spike2.cycle(...)`, click elsewhere in the same field between pastes, confirm whether the next splice corrupts state or self-corrects via D3's substring-not-found skip. Decision: if it self-corrects on the next emission, no code change. If it corrupts, the streaming-mode README adds a "don't click mid-stream" caveat.
 
+## Measurement on real workload (plan step 7)
+
+Step 7 of the [plan][plan] — "Measurement on real workload. Long, multi-pause prompts in real target apps. How does it *feel*? Does revision flicker annoy or help? Does accuracy degrade enough to matter for prompt entry? Go/no-go on flipping `cfg.streaming_default = true`" — cannot be automated. The two questions it asks are subjective (how it feels) and workload-specific (the user's own dictation patterns). The agent cannot stand in for the user here.
+
+This section is the verification checklist the user runs after the implementation lands. The outcome flips one bit in [`~/.hammerspoon/voice-dictate-config.lua`][hs-cfg] (`stream_default = true` to make streaming the new default, or leave `false` to keep it opt-in).
+
+### Setup
+
+1. Pull this branch and run `./install.sh` (writes the new streaming config keys + symlinks the new Lua siblings).
+2. `hs.reload()` in the Hammerspoon Console. The startup print line should now name two hotkeys: `Toggle = Cmd+Shift+D, Stream = Cmd+Shift+S`.
+3. Run [`tmp/streaming-spike/spike-1-emit.sh`][spike-1] once with a short utterance to confirm `whisper-stream` works against the active mic. If it fails: check `STREAM_CAPTURE_ID` (the SDL2 device ID is not the same as ffmpeg's `MIC_INDEX` — see the Spike 1 § Deferred-to-user-run notes).
+
+### Workload
+
+Use the streaming hotkey for ≥1 full day of real dictation across at least:
+
+- A long multi-clause prompt to Claude Code or ChatGPT (target: ≥2 sentences, ≥1 mid-sentence pause).
+- A short single-clause search query (Spotlight, browser address bar).
+- A code identifier dictation (Terminal prompt, a variable name).
+- A mid-utterance correction — start a sentence, change your mind, restart.
+
+### Go/no-go criteria
+
+Each is a "Yes" / "No" plus a sentence of qualitative detail. Decision rule listed inline.
+
+- **Latency to first text** — does text appear within ~1s of speech start? If **No** → keep `stream_default = false`; streaming is not delivering the UX the plan was built around.
+- **Revision flicker** — at the default `STREAM_STEP_MS=500`, is the visible re-paste rhythm tolerable or distracting? If distracting → raise `STREAM_STEP_MS` to 1000 in `bin/config.local.sh`, re-test. If still distracting after 1500 → streaming stays opt-in.
+- **Accuracy regression vs single-shot** — re-dictate the same prompt with the single-shot hotkey and compare. If the streaming version requires ≥1 post-paste edit per ~20 words that the single-shot did not → keep `stream_default = false`.
+- **Divergence skip behaviour (D3)** — edit a word mid-stream; does the next emission self-correct, or does it clobber the edit? If clobber → file a follow-up plan; do **not** flip the default.
+- **Focus-loss stop (D6)** — switch apps mid-stream; does the session stop cleanly with the clipboard restored? If session leaks across apps → blocking; do not enable.
+- **Per-app blocklist** — work through the Spike 2 target list. Each app that fails any column gets added to `stream_blocklist` in the config before the default flips.
+- **Clipboard preservation (D4)** — `Cmd+C` something before a streaming session; after the session ends, paste — is the original content back? If not → leak; do not enable.
+
+### Outcome
+
+If every criterion is **Yes** for the user's real workload and target apps, set `stream_default = true` in `voice-dictate-config.lua` and open a follow-up plan that captures: (a) the per-app blocklist as discovered, (b) any defaults that needed tuning, (c) the conditions under which the user fell back to single-shot.
+
+If any criterion is **No**, streaming stays opt-in. The plan's [§ D5][plan-d2] already commits to that being a viable steady state.
+
 [plan]: 2026-05-26-streaming-transcription.md
 [plan-d2]: 2026-05-26-streaming-transcription.md#decisions
 [plan-d6]: 2026-05-26-streaming-transcription.md#decisions
@@ -77,4 +116,5 @@ The plan's [§ Risks][plan-risks] flags this as the ugliest divergence case. Spi
 [spike-2]: ../../tmp/streaming-spike/spike-2-splice.lua
 [stream-sh]: ../../bin/stream.sh
 [lua-stream]: ../../hammerspoon/voice-dictate-stream.lua
+[hs-cfg]: ../../hammerspoon/README.md
 [claude]: ../../CLAUDE.md
