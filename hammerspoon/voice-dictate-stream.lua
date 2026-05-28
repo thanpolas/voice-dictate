@@ -46,17 +46,35 @@ local onEmission = function(_line) end
 
 -- ───── stdout consumption ───────────────────────────────────────────────────
 
---- Strip the [Start speaking] readiness marker, leading/trailing whitespace,
---- and any whisper-stream non-speech markers (`[BLANK_AUDIO]`, `(silence)`,
---- `(soft music)`, etc.). Returns nil when nothing useful remains. Skipping
---- markers at this layer means the splice layer's "first emission" detection
---- (lastPastedDictationText == "") stays accurate — a non-speech marker
---- pasted as the first emission would otherwise commit garbage and push
+--- Strip ANSI/VT100 escape sequences. Whisper-stream renders its output
+--- in-place with CSI codes (`\e[2K` clear-line, `\e[0;…` colour resets, …);
+--- the ESC byte is invisible in most consoles but the bracketed payload
+--- leaks into our emissions and (a) breaks Lua patterns when `[` appears
+--- without a `]`, (b) shows up as garbage if pasted. Covers CSI, OSC,
+--- charset designation, and 2-byte ESC <letter>.
+--- @param s string Raw line possibly containing ANSI escapes.
+--- @return string Same line with the escapes removed.
+local function stripAnsi(s)
+  return (s
+    :gsub("\27%[[%d;?]*[a-zA-Z]", "")
+    :gsub("\27%]%d+;[^\7\27]*\7", "")
+    :gsub("\27[%(%)%*%+][A-Za-z0-9]", "")
+    :gsub("\27[A-Za-z=>]", "")
+  )
+end
+
+--- Strip the [Start speaking] readiness marker, ANSI escapes, leading/trailing
+--- whitespace, and any whisper-stream non-speech markers (`[BLANK_AUDIO]`,
+--- `(silence)`, `(soft music)`, etc.). Returns nil when nothing useful remains.
+--- Skipping markers at this layer means the splice layer's "first emission"
+--- detection (lastPastedDictationText == "") stays accurate — a non-speech
+--- marker pasted as the first emission would otherwise commit garbage and push
 --- subsequent splice cycles down the Shift+Cmd+Up path on a still-empty field.
 --- @param raw string One line of whisper-stream stdout as Hammerspoon delivered it.
 --- @return string|nil The cleaned emission, or nil if the line is empty / marker-only.
 local function cleanEmission(raw)
-  local clean = raw:gsub(READY_MARKER, "")
+  local clean = stripAnsi(raw)
+  clean = clean:gsub(READY_MARKER, "")
   clean = clean:gsub("^%s+", ""):gsub("%s+$", "")
   -- Strip a line that is entirely bracketed/parenthesized markers + punctuation:
   -- remove all [..] and (..) blocks, then any leftover whitespace and dots.

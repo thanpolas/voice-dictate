@@ -102,12 +102,16 @@ local function spliceCycle(emission)
   selectToStart()
   cutSelection()
   local cut = hs.pasteboard.getContents() or ""
-  if not cut:find(lastPastedDictationText, 1, true) then
+  local startIdx, endIdx = cut:find(lastPastedDictationText, 1, true)
+  if not startIdx then
     hs.pasteboard.setContents(cut)
     pasteClipboard()
     return false
   end
-  local swapped = (cut:gsub(lastPastedDictationText, newFullText, 1))
+  -- Concat-based splice rather than gsub so pattern magic in the anchor
+  -- (e.g. an unmatched `[` left over from ANSI noise, or a literal `%`)
+  -- can never break the replace.
+  local swapped = cut:sub(1, startIdx - 1) .. newFullText .. cut:sub(endIdx + 1)
   hs.pasteboard.setContents(swapped)
   pasteClipboard()
   lastPastedDictationText = newFullText
