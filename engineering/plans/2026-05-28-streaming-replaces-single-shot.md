@@ -104,6 +104,78 @@ init: obtained spec for input device (SDL Id = 2):
 
 **Decision:** set `STREAM_CAPTURE_ID=3` in `bin/config.local.sh` to pin whisper-stream to device #3 `iMac Microphone` — the user's actual input. (Initially mis-pinned to #1 `iPhone Microphone` based on the name reading like a personal device; user corrected — that one is an older Bluetooth headset that isn't in use.) The config file is gitignored and user-specific, which is the right home — SDL2 device ordering is per-machine. Long-term follow-up: `install.sh` should list SDL2 devices and prompt for the capture ID, the same way it does for ffmpeg's `AUDIO_DEVICE` via the menubar picker; out of scope for this session.
 
+### 2026-05-28 ~22:00 — iMac mic on SDL2 still produces hallucinations
+
+With turbo + 10s window + correct mic (device #3) the field still filled with subtitle-style hallucinations ("Ωραία! Ωραία! Ωραία!", "Υπότιτλοι AUTHORWAVE", "Ευχαριστώ."). User pushed back hard on "the mic must be the bottleneck" framing — said the iMac mic worked fine for single-shot. (We later discovered that "worked fine for single-shot" was actually using the *iPhone* via Continuity — see next entry — but the pushback was correct in spirit: deflecting onto the mic was avoiding the deeper question.)
+
+### 2026-05-28 ~22:10 — Ground-truth the device mapping: ffmpeg :0 was iPhone all along
+
+Stopped guessing device names from strings. Ran `ffmpeg -f avfoundation -list_devices true -i ""` directly:
+
+| Index | AVFoundation (ffmpeg) | SDL2 (whisper-stream) |
+|---|---|---|
+| 0 | `iPhone Microphone` (iPhone via Continuity) | `External Audio Device` |
+| 1 | `External Audio Device` | `iPhone Microphone` (iPhone) |
+| 2 | `BlackHole 2ch` | `BlackHole 2ch` |
+| 3 | `iMac Microphone` | `iMac Microphone` |
+
+Two indexing systems, two different orderings, same hardware. `AUDIO_DEVICE=:0` in `bin/config.local.sh` (the default) was silently sending ffmpeg to the iPhone. Every previously-clean single-shot transcript was iPhone audio, not iMac. The user's "iMac mic works fine for single-shot" was correct phenomenologically but wrong attributively — the audio path was iPhone, never iMac.
+
+**Decision:** set `AUDIO_DEVICE=:3` to honour the stated intent (iMac internal mic for both paths).
+
+### 2026-05-28 ~22:20 — `--save-audio` diagnostic: SDL2 captures degraded audio
+
+Added `--save-audio` to whisper-stream so we could inspect the actual WAV SDL2 captured. Transcribed it with `whisper-cli`: identical garbage. So the bug is in SDL2's capture, not in whisper-stream's step-mode inference.
+
+Loudness check via `ffmpeg -af volumedetect`: mean −41.2 dB, peak −14.5 dB. Way below typical voice (mean −25 to −30, peak −3 to −6). Amplifying the SDL2 WAV by 20 dB and re-transcribing: still garbage. So the gain deficit was real but not the only thing wrong.
+
+### 2026-05-28 ~22:30 — Decisive isolation: ffmpeg + iMac mic = perfect transcript
+
+The test that should have been run at the very start of this thread:
+
+```
+ffmpeg -y -f avfoundation -i ":3" -t 6 -ar 16000 -ac 1 \
+  -acodec pcm_s16le /tmp/imac-ffmpeg.wav
+./bin/dictate.sh transcribe /tmp/imac-ffmpeg.wav
+→ "Δοκιμή 1,2,3 Πρώτη πρόταση, δεύτερη πρόταση"
+```
+
+Perfect. **Same physical mic, same model, same on-disk WAV format (16 kHz mono pcm_s16le). The only variable is the capture stack** — AVFoundation vs SDL2. AVFoundation applies macOS's Voice Processing IO unit (AGC, noise suppression, echo cancellation) automatically; SDL2's CoreAudio path bypasses it. The iMac internal mic produces raw audio that *needs* that DSP to be ASR-grade. Whisper-stream was structurally unfixable on this hardware.
+
+### 2026-05-28 ~22:45 — Decision: scrap whisper-stream, rebuild on ffmpeg + whisper-server
+
+The fix isn't a tuning knob. Architecture has to change. New plan opened at [`2026-05-28-ffmpeg-streaming-rebuild.md`][rebuild-plan] supersedes D1 of the original streaming plan: ffmpeg captures via AVFoundation (so Voice Processing runs), `whisper-server` keeps the model resident as an HTTP daemon (so per-tick inference pays no model-load tax), an `hs.timer` snapshots the in-progress WAV every 2s and POSTs it to the server, the splice paste layer receives full-transcript emissions and substring-replaces in place.
+
+### 2026-05-28 ~23:00 — Repo-local `tmp/` rule, hard
+
+User noticed accumulating `/tmp` litter (`/tmp/voice-dictate-*.pid`, `/tmp/voice-dictate-*.log`, snapshot WAVs) and made it a project rule: every transient artefact goes in the repo-local `tmp/` directory, never `/tmp`. Codified in [`CLAUDE.md` § Scratch paths][claude] and saved as the `feedback_repo_local_tmp` memory. Shell scripts derive `TMP_DIR` from `SCRIPT_DIR`; Lua modules derive it from `cfg.stream_sh` by stripping `/bin/<file>`. All existing `/tmp` paths in the repo migrated in one refactor commit. Project-wide rule that future PRs inherit automatically.
+
+### 2026-05-28 ~23:20 — Rebuild steps 1-3 committed; e2e verification pending
+
+Three commits land the new architecture:
+
+1. `refactor: stream.sh becomes an ffmpeg recorder` — `bin/stream.sh record <wav-path>` mirrors `dictate.sh record`'s SIGINT-forwarding bash-wrapper dance, same flags, same lifecycle. No transcription happens at the shell layer; the WAV accumulates on disk for Lua to snapshot.
+2. `feat: whisper-server lifecycle helper for streaming inference` — `bin/stream-server.sh start|stop|status` manages a backgrounded `whisper-server` on `127.0.0.1:8472`. Smoke-tested by POSTing `/tmp/imac-ffmpeg.wav` to `/inference`; response was the exact expected Greek transcript. Initial readiness probe used `curl -sf` and treated 404 as failure; fixed to accept any non-`000` HTTP code (the listener being up at all is the signal).
+3. `feat: wire stream orchestrator to ffmpeg+server pipeline` — `voice-dictate-stream.lua` now boots the server, spawns ffmpeg via `bin/stream.sh record`, and runs `hs.timer.doEvery(2s, …)` that: spawns `ffmpeg -c copy` to finalise an in-progress-WAV snapshot (in-progress WAVs aren't valid because the header isn't yet finalised), POSTs the snapshot to the server, parses `hs.json.decode`, dispatches the full transcript to `splice.applyEmission`. `voice-dictate-stream-mode.lua` hardcodes `append_only = false` since each new emission is a revision of the previous (monotonically-growing session transcript) — the splice's substring-replace mechanic is exactly the right paste behaviour now.
+
+[rebuild-plan]: 2026-05-28-ffmpeg-streaming-rebuild.md
+[claude]: ../../CLAUDE.md
+
+### Status at end of this session
+
+What is *verified*:
+- ffmpeg captures iMac mic cleanly, transcribes correctly via `whisper-cli` and via `whisper-server` POST.
+- `bin/stream.sh record`, `bin/stream-server.sh start|stop|status`, the readiness probe, the snapshot mechanic, and the JSON parsing all work in isolation.
+- All `/tmp` references removed from the codebase; convention codified.
+
+What is *not yet verified* end-to-end:
+- The full path mic → ffmpeg → snapshot → server → Lua timer → splice → focused field. Each piece works; the integration has not been driven by a real user holding Right Option / tapping Cmd+Shift+D and reading the test fixture into a focused text field.
+- Server warmup vs first-tick race (the first 1-2 ticks may fail silently while the server loads the model; postSnapshot drops failed curl calls without error).
+- Short-utterance behaviour (PTT held <2s never fires the timer; no transcript pastes). Documented as a known limitation; the synchronous "finalize-and-paste on stop" path is not implemented.
+- Cmd+Shift+Up behaviour in real apps now that the first-cycle skip is in place.
+
+The next session's job is to drive the verification, log the result here as the next entry, and either close the goal or open a follow-up plan for whatever broke.
+
 ## Test fixture for repeatable comparisons
 
 For meaningful before/after testing across config changes, read the same Greek text aloud each time. Same words, same pace, same mic position — that way an emission table actually shows whether the change helped.
