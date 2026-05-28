@@ -50,13 +50,12 @@ function write_lua_config() {
 
 return {
   dictate_sh = "${dictate_sh}",
+  stream_sh = "${bin_dir}/stream.sh",
+  server_sh = "${bin_dir}/stream-server.sh",
   toggle_mods = {"cmd", "shift"},
   toggle_key = "D",
   right_alt_keycode = 61,
-  flush_delay_s = 0.2,
   hide_hammerspoon_icon = true,
-  stream_sh = "${bin_dir}/stream.sh",
-  server_sh = "${bin_dir}/stream-server.sh",
 }
 EOF
   log ok "wrote ${destination}"

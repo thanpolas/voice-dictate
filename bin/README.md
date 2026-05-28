@@ -1,6 +1,6 @@
 # bin — shell side
 
-`dictate.sh` is the single-shot record/transcribe entry point spawned by [voice-dictate.lua](../hammerspoon/voice-dictate.lua); standalone-runnable for manual testing. `stream.sh` is its opt-in streaming sibling — long-lived `whisper-stream`, revisable hypotheses, clipboard-mediated splice (see [the streaming-transcription plan](../engineering/plans/2026-05-26-streaming-transcription.md)). Three more sibling scripts provide automated tests and a process watchdog — they are not in the runtime path.
+`dictate.sh` is the single-shot record/transcribe entry point — kept for ad-hoc shell use; no hotkey reaches it any more. `stream.sh` and `stream-server.sh` together drive the live-streaming pipeline that the Hammerspoon hotkeys now invoke (see [the ffmpeg-streaming-rebuild plan](../engineering/plans/2026-05-28-ffmpeg-streaming-rebuild.md)): `stream.sh record` keeps an `ffmpeg` AVFoundation capture writing to a session WAV; `stream-server.sh` keeps a `whisper-server` daemon loaded so per-tick inference pays no model-load tax; the Lua side polls every ~2s and POSTs a finalised snapshot of the WAV to the daemon. Three more sibling scripts provide automated tests and a process watchdog — they are not in the runtime path.
 
 ## [dictate.sh](dictate.sh)
 
@@ -48,23 +48,40 @@ Soft cap 200 lines, currently ~100. Split triggers: a fourth subcommand, or a ne
 ## [stream.sh](stream.sh)
 
 ```
-stream.sh stream                    launch whisper-stream; emit lines on stdout until killed
+stream.sh record <wav-path>         capture mic to WAV until SIGTERM/SIGINT
 ```
 
-Sibling of [dictate.sh](dictate.sh) — single-shot is unchanged. Streaming is opt-in: the user picks per utterance (accuracy → single-shot; liveness → streaming). The two never share state.
+Sibling of [dictate.sh](dictate.sh)'s `record` subcommand — same `ffmpeg -f avfoundation` flags, same SIGINT-forwarding bash wrapper, same `AUDIO_DEVICE` source. The Hammerspoon side spawns it once per session and signals via SIGTERM when the user stops; ffmpeg flushes the WAV trailer and exits 0. Per-tick transcription lives in [stream-server.sh](stream-server.sh); this script only records.
+
+### Why a separate script
+
+`dictate.sh record` already produces a clean WAV, but the streaming pipeline needs the file to be the durable session source — it grows for the whole session and the poller derives snapshots from it. Keeping the recorder split as a sibling avoids overloading `dictate.sh` with a long-running concern and keeps the single-shot path zero-touch. Earlier streaming used `whisper-stream` (SDL2 capture) and bypassed the Apple Voice Processing IO unit — that produced unusable transcripts from the iMac internal mic and was rebuilt around `ffmpeg` for the same DSP coverage the single-shot path gets.
+
+### Configurable values
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AUDIO_DEVICE` | from `config.local.sh` | Shared with [dictate.sh](dictate.sh) — same AVFoundation index, same DSP. |
+
+### Size budget
+
+Soft cap 200 lines, currently ~90. Split triggers: a second subcommand, or per-recording post-processing distinct from the single-shot path.
+
+## [stream-server.sh](stream-server.sh)
+
+```
+stream-server.sh start [port]       spawn whisper-server on loopback
+stream-server.sh stop               kill the daemon
+stream-server.sh status             "running PID …" / "stopped" (exit 0/1)
+```
+
+The streaming inference daemon — `whisper-server` loaded once with the configured model, listening on `127.0.0.1:8472` by default. Each Lua poll POSTs a finalised WAV snapshot to `/inference`; the daemon returns `{"text":"…"}`. Without the daemon, every poll would pay ~500ms-1s to reload the model.
 
 ### Contracts
 
-- **`stream`** — `exec`s `whisper-stream` in step mode. Emits the current transcription of the rolling audio window every `STREAM_STEP_MS` to stdout. Window length is `STREAM_LENGTH_MS`; `STREAM_KEEP_MS` of the previous window is carried across boundaries. Same model and language the single-shot path uses. `exec` means SIGTERM from Hammerspoon hits whisper-stream directly — no wrapper bash, no avfoundation signal-latency dance: SDL2 cleans up on process exit, no WAV trailer to flush.
-- **No subcommand selects single-shot.** That lives in [dictate.sh](dictate.sh). `stream.sh` does one thing.
-
-### Target-field scope
-
-Plain-text fields only — prompt boxes, search bars, single-line and plain-textarea inputs, Terminal prompts. Rich-text editors (Slack, Gmail, Notion, iMessage) are out of scope by design: the splice's `Cmd+X` on styled content yields RTF/HTML the layer cannot reliably modify. The Hammerspoon side enforces the blocklist; this script does no app inspection itself.
-
-### Accuracy caveat
-
-Streaming runs whisper over a sliding 5s window. Single-pass `whisper-cli` on a full utterance — what [dictate.sh](dictate.sh) does — is more accurate, especially at clause boundaries and for technical vocabulary. The streaming defaults trade accuracy for liveness; the user opts in per utterance when liveness matters.
+- **`start`** — idempotent. If a prior PID file points at a live process, exits 0 without spawning a second. Waits up to `READY_TIMEOUT_S` (20s) for the listener to bind before declaring success; the model load happens during that window. Writes the PID + log under the repo-local `tmp/` directory (project rule: never `/tmp` — see [CLAUDE.md][claude-md] § Scratch paths).
+- **`stop`** — SIGTERM with a 2.5s patience, then SIGKILL. Removes the PID file regardless. Safe to call when nothing is running.
+- **`status`** — pure read-only check; useful for shell verification independent of the Lua side.
 
 ### Configurable values
 
@@ -73,18 +90,11 @@ Streaming runs whisper over a sliding 5s window. Single-pass `whisper-cli` on a 
 | `MODEL_PATH` | from `config.local.sh` | Shared with [dictate.sh](dictate.sh). |
 | `LANGUAGE` | from `config.local.sh` | Shared with [dictate.sh](dictate.sh). |
 | `THREADS` | from `config.local.sh` | Shared with [dictate.sh](dictate.sh). |
-| `STREAM_STEP_MS` | `500` | How often whisper-stream emits the current transcript of the rolling window. Raise to 1000–1500 if splice flicker or inference latency is excessive. |
-| `STREAM_LENGTH_MS` | `10000` | Length of the rolling audio window. 5s starved large-v3 of context and produced subtitle-style hallucinations in Greek; 10s anchors meaningfully. Lower toward 5000 if per-emission inference falls behind on slower hardware. |
-| `STREAM_KEEP_MS` | `200` | Carry-over from the prior window for boundary continuity. Rarely needs tuning. |
-| `STREAM_CAPTURE_ID` | `-1` (SDL2 default) | SDL2 capture device ID. **Not** the same as ffmpeg's `MIC_INDEX`; list devices by running `stream.sh` once and watching the SDL2 stderr output. |
-
-### Lifecycle
-
-`stream.sh stream` exits on SIGTERM/SIGINT immediately — whisper-stream is replaced via `exec`, so the kernel delivers the signal to it without a bash intermediary. There is no SIGTERM-graceful-WAV-flush dependency to preserve.
+| `STREAM_SERVER_PORT` | `8472` | Loopback port the daemon binds. Picked outside common dev-server ports to dodge collisions. |
 
 ### Size budget
 
-Soft cap 200 lines, currently ~110. Split triggers: per-emission post-processing (filtering hallucinated `[BLANK_AUDIO]` markers, locale normalisation), or an alternate streaming backend (VAD-mode for the rejected-shape-B-vad path).
+Soft cap 200 lines, currently ~170. Split triggers: a streaming `/inference` long-poll mode, or a second daemon (e.g. an LLM cleanup pass) that warrants its own lifecycle helper.
 
 ## [test-record-shutdown.sh](test-record-shutdown.sh)
 

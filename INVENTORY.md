@@ -25,11 +25,12 @@ Settled engineering rules. Folder switchboard: [engineering/README.md](engineeri
 
 Shell-side recorder and transcriber. Leaf README: [bin/README.md](bin/README.md).
 
-- [bin/dictate.sh](bin/dictate.sh) — Three subcommands (record, transcribe, smoke). Spawned by Hammerspoon; standalone-runnable.
-- [bin/stream.sh](bin/stream.sh) — Opt-in streaming entry: long-lived whisper-stream emitting one line per STREAM_STEP_MS over the rolling audio window.
+- [bin/dictate.sh](bin/dictate.sh) — Single-shot record/transcribe (record, transcribe, smoke). Kept for ad-hoc shell use; no hotkey reaches it any more.
+- [bin/stream.sh](bin/stream.sh) — Streaming recorder: long-running ffmpeg AVFoundation capture to a session WAV; spawned by Hammerspoon, signalled via SIGTERM at session end.
+- [bin/stream-server.sh](bin/stream-server.sh) — Streaming inference daemon lifecycle (start/stop/status); keeps whisper-server loaded on loopback so per-tick inference pays no model-load tax.
 - [bin/test-record-shutdown.sh](bin/test-record-shutdown.sh) — End-to-end test of record shutdown — SIGTERM forwarding, no orphan ffmpegs, WAV duration preserved.
 - [bin/test-transcribe-output.sh](bin/test-transcribe-output.sh) — Regression test asserting `transcribe` output is free of ANSI escape bytes, direct and via `bash -c`.
-- [bin/monitor-ghosts.sh](bin/monitor-ghosts.sh) — Background watchdog that logs ffmpeg-recording PID transitions to `/tmp/voice-dictate-ghost-watch.log`.
+- [bin/monitor-ghosts.sh](bin/monitor-ghosts.sh) — Background watchdog that logs ffmpeg-recording PID transitions to repo-local `tmp/ghost-watch.log`.
 
 ## [hammerspoon/](hammerspoon/)
 
@@ -38,7 +39,7 @@ Lua module loaded from the user's `~/.hammerspoon/init.lua`. Leaf README: [hamme
 - [hammerspoon/voice-dictate.lua](hammerspoon/voice-dictate.lua) — Hotkey handlers (PTT + toggle) driving streaming via voice-dictate-stream-mode. Public API: `M.start()` / `M.stop()`.
 - [hammerspoon/voice-dictate-menu.lua](hammerspoon/voice-dictate-menu.lua) — Menubar command center: idle icon, dropdown, `● LIVE` streaming title; hides Hammerspoon's icon.
 - [hammerspoon/voice-dictate-mic.lua](hammerspoon/voice-dictate-mic.lua) — Mic picker: avfoundation device scan, Microphone submenu, NSUserDefaults persistence.
-- [hammerspoon/voice-dictate-stream.lua](hammerspoon/voice-dictate-stream.lua) — Streaming stdout consumer: spawns bin/stream.sh, splits emissions, dispatches cleaned lines to a registered handler.
+- [hammerspoon/voice-dictate-stream.lua](hammerspoon/voice-dictate-stream.lua) — Streaming pipeline orchestrator: spawns bin/stream.sh + bin/stream-server.sh, polls every ~2s, POSTs WAV snapshots to /inference, dispatches each transcript to a registered handler.
 - [hammerspoon/voice-dictate-splice.lua](hammerspoon/voice-dictate-splice.lua) — Clipboard-mediated splice paste layer; owns D3 divergence skip, D4 clipboard preservation, D6 focus-loss stop.
 - [hammerspoon/voice-dictate-stream-mode.lua](hammerspoon/voice-dictate-stream-mode.lua) — Streaming session orchestrator; composes voice-dictate-stream + voice-dictate-splice into startSession/stopSession called from the main module's hotkeys.
 

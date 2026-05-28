@@ -1,8 +1,9 @@
---- @fileoverview Clipboard-mediated splice — paste each whisper-stream emission
+--- @fileoverview Clipboard-mediated splice — paste each pipeline emission
 --- into the focused field via Shift+Cmd+Up / Cmd+X / modify clipboard / Cmd+V.
---- Sibling of voice-dictate-stream.lua: stream.lua consumes the stdout; this
---- module turns emissions into paste cycles while preserving the user's
---- clipboard across the session and stopping on focus loss.
+--- Sibling of voice-dictate-stream.lua: stream.lua dispatches each cleaned
+--- transcript as an emission; this module turns emissions into paste cycles
+--- while preserving the user's clipboard across the session and stopping on
+--- focus loss.
 ---
 --- Public API: M.startSession(cfg), M.applyEmission(line), M.stopSession(),
 --- M.setOnStop(fn), M.isActive().
@@ -26,8 +27,10 @@ local PASTE_SETTLE_MS = 40
 --- True between startSession() and stopSession(); read by stream.lua.
 local isActive = false
 
---- Words that have fallen off the whisper-stream window — D2 commit/tail.
---- Empty until the calibration-driven promotion algorithm wires up.
+--- Committed prefix prepended to every emission before pasting. Always
+--- empty under the ffmpeg + whisper-server pipeline because each emission
+--- is the full transcript of the session so far; kept as a hook for a
+--- future windowing strategy that would commit stable prefixes.
 local committedPrefix = ""
 
 --- Full dictation text last pasted into the field; the splice's anchor
@@ -40,7 +43,10 @@ local pasteboardSnapshot = nil
 --- hs.window.filter handle subscribed for focus-change events.
 local focusFilter = nil
 
---- True for Spike 1 fallback: emissions are append-only, no splice replace.
+--- True when emissions should append at the cursor rather than splice-
+--- replace the prior paste. The current pipeline (ffmpeg + whisper-server)
+--- emits full revisions, so stream-mode forces this to false; the append
+--- branch survives as a fallback for callers passing append_only = true.
 local appendOnly = false
 
 --- Caller hook fired when focus-loss policy (D6) self-stops the session.
@@ -89,7 +95,7 @@ end
 --- Shift+Cmd+Up + Cmd+X dance entirely and just paste at the cursor.
 --- Avoids triggering apps that interpret Shift+Cmd+Up on an empty prompt
 --- as "load previous history" (Claude Code's input, most REPLs).
---- @param emission string Cleaned whisper-stream emission for this cycle.
+--- @param emission string Cleaned pipeline emission for this cycle.
 --- @return boolean True if the splice landed; false on divergence skip.
 local function spliceCycle(emission)
   local newFullText = committedPrefix .. emission
@@ -119,16 +125,16 @@ local function spliceCycle(emission)
 end
 
 --- Append-only emission: paste the new content at the cursor without
---- selecting / cutting / replacing. The Spike 1 fallback (now the default)
---- because whisper-stream's step-mode emissions over a short rolling window
---- are not stable revisions — successive emissions are disjoint transcripts
---- of overlapping audio, so replacing each with the next would lose every-
---- thing except the final 5s. Append preserves all real speech the model
---- emits at the cost of some duplication around window boundaries.
---- Inserts a single space when the previous paste did not end with whitespace
---- and the new emission does not start with one — so accumulated text stays
---- word-segmented.
---- @param emission string Cleaned whisper-stream emission for this cycle.
+--- selecting / cutting / replacing. Fallback path retained for callers
+--- whose emission stream is not a stable full revision — e.g. a future
+--- delta-only backend, or the historical whisper-stream rolling window
+--- where successive emissions were disjoint transcripts of overlapping
+--- audio. Under the current ffmpeg + whisper-server pipeline each
+--- emission is the full transcript, so stream-mode forces spliceCycle.
+--- Inserts a single space when the previous paste did not end with
+--- whitespace and the new emission does not start with one — so
+--- accumulated text stays word-segmented.
+--- @param emission string Cleaned pipeline emission for this cycle.
 local function appendCycle(emission)
   local needsSpace = lastPastedDictationText ~= ""
     and not lastPastedDictationText:match("%s$")
@@ -176,10 +182,11 @@ function M.startSession(cfg)
   pasteboardSnapshot = hs.pasteboard.getContents()
   committedPrefix = ""
   lastPastedDictationText = ""
-  -- Default to append-only when the config does not explicitly set it.
-  -- Splice (false) only makes sense if whisper-stream gives stable revisions
-  -- across emissions; in practice it does not at our window/model size, so
-  -- append is the safe default.
+  -- Default to append-only when the caller does not explicitly set it.
+  -- The production caller (voice-dictate-stream-mode) always passes
+  -- append_only = false because the ffmpeg + whisper-server pipeline
+  -- emits full revisions; append survives as a safer fallback for any
+  -- caller whose emissions are not stable revisions.
   if cfg ~= nil and cfg.append_only ~= nil then
     appendOnly = cfg.append_only
   else
@@ -190,7 +197,7 @@ function M.startSession(cfg)
 end
 
 --- Dispatch one emission line through the configured cycle.
---- @param line string Cleaned whisper-stream emission.
+--- @param line string Cleaned pipeline emission.
 function M.applyEmission(line)
   if not isActive or not line or line == "" then return end
   if appendOnly then appendCycle(line) else spliceCycle(line) end

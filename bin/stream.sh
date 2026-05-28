@@ -8,9 +8,9 @@
 #
 # Sibling of bin/dictate.sh, sharing its AVFoundation capture path so the same
 # Voice Processing IO unit (AGC, noise suppression, echo cancellation) runs
-# under both single-shot and streaming. Earlier streaming used whisper-stream
-# (SDL2), which bypassed that DSP and produced unusable transcripts from the
-# iMac internal mic. See engineering/plans/2026-05-28-ffmpeg-streaming-rebuild.md.
+# under both single-shot and streaming. Rationale and the prior whisper-stream
+# (SDL2) capture path that this replaced are in
+# engineering/plans/2026-05-28-ffmpeg-streaming-rebuild.md.
 #
 # Runtime config (LANGUAGE, AUDIO_DEVICE) is sourced from bin/config.local.sh —
 # the same file the single-shot path uses, so mic selection is one knob.

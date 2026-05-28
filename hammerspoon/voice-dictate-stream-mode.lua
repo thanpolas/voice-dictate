@@ -5,13 +5,15 @@
 ---
 --- Public API:
 ---   M.init()              Wire focus-loss self-stop. Call once from voice-dictate.lua's M.start().
----   M.startSession(cfg)   Spawn whisper-stream + start the splice. Idempotent.
----   M.stopSession()       Tear down the splice + kill whisper-stream. Safe to repeat.
+---   M.startSession(cfg)   Boot the pipeline + start the splice. Idempotent.
+---   M.stopSession()       Tear down the splice + the pipeline. Safe to repeat.
 ---   M.isActive()          True iff a session is currently running.
 
 local M = {}
 
---- stdout consumer that turns whisper-stream lines into emissions.
+--- Streaming pipeline orchestrator — owns the ffmpeg recorder, the
+--- whisper-server daemon, and the polling timer that dispatches each
+--- inference response as an emission.
 local stream = require("voice-dictate-stream")
 
 --- Per-emission paste mechanic — owns the clipboard splice + focus stop.
@@ -21,8 +23,8 @@ local splice = require("voice-dictate-splice")
 
 --- Wire the focus-loss self-stop once at module setup time. Splice fires the
 --- onStop hook from its hs.window.filter focus-change handler; we route that
---- to stream.stop() so the whisper-stream process dies alongside the splice
---- when focus leaves the field.
+--- to stream.stop() so the pipeline tears down alongside the splice when
+--- focus leaves the field.
 function M.init()
   splice.setOnStop(function() stream.stop() end)
 end
@@ -51,9 +53,9 @@ function M.stopSession()
   splice.stopSession()
 end
 
---- True iff either the whisper-stream task or the splice is currently
---- active. Both should be live together; the OR is defensive against a
---- race where one side has torn down but the other has not yet.
+--- True iff either the pipeline or the splice is currently active. Both
+--- should be live together; the OR is defensive against a race where one
+--- side has torn down but the other has not yet.
 --- @return boolean
 function M.isActive()
   return stream.isStreaming() or splice.isActive()

@@ -5,9 +5,9 @@ Lua files loaded via the user's `~/.hammerspoon/init.lua` (which requires the ma
 - [voice-dictate.lua](voice-dictate.lua) — main entry. Hotkeys, state machine, single-shot recording, paste.
 - [voice-dictate-menu.lua](voice-dictate-menu.lua) — menubar command center: the idle icon, the dropdown, the recording title, the spinner.
 - [voice-dictate-mic.lua](voice-dictate-mic.lua) — mic picker. Scans avfoundation inputs, persists choice via `hs.settings`, builds the Microphone submenu.
-- [voice-dictate-stream.lua](voice-dictate-stream.lua) — opt-in streaming mode: stdout consumer for `bin/stream.sh`. Stateless splice-wise; pairs with voice-dictate-splice.lua.
+- [voice-dictate-stream.lua](voice-dictate-stream.lua) — streaming pipeline orchestrator: spawns `bin/stream.sh` + `bin/stream-server.sh`, runs an `hs.timer` every ~2s to POST a WAV snapshot and dispatch the JSON transcript to the registered emission handler. Stateless splice-wise; pairs with voice-dictate-splice.lua.
 - [voice-dictate-splice.lua](voice-dictate-splice.lua) — clipboard-mediated splice paste layer. Per-emission `Shift+Cmd+Up` / `Cmd+X` / modify / `Cmd+V` with D3 divergence skip, D4 clipboard preservation, D6 focus-loss stop.
-- [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua) — orchestrator. Binds the streaming hotkey and composes stream + splice; the single-shot path in [voice-dictate.lua](voice-dictate.lua) is untouched.
+- [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua) — session orchestrator. Composes voice-dictate-stream (pipeline) + voice-dictate-splice (paste) into start/stop calls driven by the main module's hotkeys.
 
 All six files must live in `~/.hammerspoon/` so Lua's `require()` can resolve the siblings — `install.sh` symlinks every `hammerspoon/*.lua`.
 
@@ -51,14 +51,14 @@ Sourced from `~/.hammerspoon/voice-dictate-config.lua`, written by `install.sh`.
 | `toggle_key` | `"D"` | Key paired with the toggle modifiers. |
 | `right_alt_keycode` | `61` | Filters the flagsChanged eventtap. Left Option is `58`. |
 | `hide_hammerspoon_icon` | `true` | Hide Hammerspoon's own menu icon so the Dikta item is the sole control surface. Set `false` to keep it. |
-| `stream_sh` | absolute path to `bin/stream.sh` (derived at install time) | Streaming shell entry point invoked by the orchestrator. |
-| `stream_append_only` | `false` | Skip the splice substring-replace and just append the delta — Spike 1 fallback when whisper-stream emissions are non-revisable. |
+| `stream_sh` | absolute path to `bin/stream.sh` (derived at install time) | ffmpeg recorder script invoked by the streaming orchestrator. |
+| `server_sh` | absolute path to `bin/stream-server.sh` (derived at install time) | whisper-server lifecycle helper invoked by the streaming orchestrator. |
 
 ### Failure modes
 
-- **`stream.sh` exits non-zero** → log to the Hammerspoon Console, reset state to IDLE.
-- **Focus leaves the field mid-session** → D6 self-stop fires: kill whisper-stream, restore the clipboard snapshot, no further pastes. User re-triggers explicitly.
-- **`hs.task` start fails** → log error, state stays IDLE. Confirm `stream_sh` in `voice-dictate-config.lua` is executable.
+- **`stream.sh` or `stream-server.sh` exits non-zero** → log to the Hammerspoon Console, reset state to IDLE.
+- **Focus leaves the field mid-session** → D6 self-stop fires: tear down the pipeline, restore the clipboard snapshot, no further pastes. User re-triggers explicitly.
+- **`hs.task` start fails** → log error, state stays IDLE. Confirm `stream_sh` / `server_sh` in `voice-dictate-config.lua` are executable.
 
 ### Reload safety
 
@@ -124,25 +124,25 @@ CLAUDE.md's 200 soft / 300 hard line cap applies per file. The command-center ex
 
 ## Streaming mode — voice-dictate-stream-mode.lua, voice-dictate-stream.lua, voice-dictate-splice.lua
 
-Three siblings cooperate to deliver the opt-in streaming pipeline. The single-shot path in [voice-dictate.lua](voice-dictate.lua) is untouched — the two modes share no runtime state.
+Three siblings cooperate to deliver the streaming pipeline that the PTT and toggle hotkeys both drive.
 
-- [voice-dictate-stream.lua](voice-dictate-stream.lua) — stdout consumer. Spawns `bin/stream.sh` via `hs.task`, splits the line-delimited emissions, strips `[Start speaking]` markers, dispatches cleaned lines to a caller-registered emission handler. Knows nothing about pasting.
+- [voice-dictate-stream.lua](voice-dictate-stream.lua) — pipeline orchestrator. Spawns `bin/stream-server.sh start` (whisper-server daemon) and `bin/stream.sh record` (long-running ffmpeg) via `hs.task`, then runs an `hs.timer` every ~2s that finalises an ffmpeg snapshot of the in-progress session WAV, POSTs the snapshot to the daemon's `/inference` endpoint, parses the JSON, and dispatches the full transcript as a single emission. Knows nothing about pasting.
 - [voice-dictate-splice.lua](voice-dictate-splice.lua) — the splice paste layer. Owns the per-emission keystroke chain, the D3 divergence skip, the D4 clipboard snapshot/restore, and the D6 focus-loss subscription.
-- [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua) — orchestrator. Binds the streaming hotkey; on tap, starts the splice session, registers `splice.applyEmission` as the stream's emission handler, and starts the stream. On second tap (or focus loss), unwinds in reverse.
+- [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua) — session orchestrator. On `startSession`, starts the splice session, registers `splice.applyEmission` as the stream's emission handler, and starts the pipeline. On `stopSession` (second hotkey tap, or focus loss), unwinds in reverse.
 
 ### State machine
 
 ```
-IDLE ──Cmd+Shift+S tap──► STREAMING ──Cmd+Shift+S tap──┐
+IDLE ──Cmd+Shift+D tap──► STREAMING ──Cmd+Shift+D tap──┐
                               │                          │
                               └─ focus loss / app exit ───┴─► IDLE (clipboard restored)
 ```
 
-`STREAMING` means `whisper-stream` is alive and the splice layer has subscribed to its stdout. There is no separate "transcribing" state — emissions arrive continuously and are pasted as they arrive.
+`STREAMING` means the whisper-server daemon and ffmpeg recorder are alive, the timer is polling, and the splice layer is subscribed to the resulting emissions. There is no separate "transcribing" state — emissions arrive every poll tick and paste live.
 
 ### The splice cycle
 
-On every emission line from `bin/stream.sh`:
+On every emission dispatched from the pipeline:
 
 1. Build the new full dictation text from the committed prefix plus the latest emission.
 2. Synthesize `Shift+Cmd+Up` (extend selection to start of document on native macOS text views).
@@ -156,7 +156,7 @@ Cursor lands at end-of-paste — equivalent to live-typing. Pre-existing content
 
 ### Configurable values
 
-The streaming-mode config keys are listed in the main "Configurable values" table for [voice-dictate.lua](voice-dictate.lua) above (`stream_sh`, `stream_toggle_mods`, `stream_toggle_key`, `stream_append_only`). All four are optional — modules fall back to defaults when keys are absent, so configs written before streaming landed continue to work without an install rerun.
+The streaming-mode config keys are listed in the main "Configurable values" table for [voice-dictate.lua](voice-dictate.lua) above (`stream_sh`, `server_sh`). Both are optional — the Lua module falls back to repo-derived defaults when keys are absent, so older configs continue to load without an install rerun.
 
 ### Divergence-skip rule (D3)
 
@@ -166,7 +166,7 @@ Exact substring match. No fuzzy matching, no recovery heuristics.
 
 ### Focus-loss policy (D6)
 
-The module subscribes to `hs.window.filter` focus events. On focus loss — including app-switching, modal dialogs stealing input, or the user clicking into a different field — the streaming session **stops immediately**: kill `whisper-stream`, flush state, restore the pre-session clipboard snapshot, take no further paste actions. The user must re-trigger streaming after re-focusing. Better than guessing where to resume.
+The module subscribes to `hs.window.filter` focus events. On focus loss — including app-switching, modal dialogs stealing input, or the user clicking into a different field — the streaming session **stops immediately**: tear down the pipeline, flush state, restore the pre-session clipboard snapshot, take no further paste actions. The user must re-trigger streaming after re-focusing. Better than guessing where to resume.
 
 ### Pasteboard preservation (D4)
 
@@ -174,6 +174,7 @@ The module subscribes to `hs.window.filter` focus events. On focus loss — incl
 
 ### Failure modes
 
-- **`stream.sh` not found / model missing** → `hs.task` exit callback fires with a non-zero exit code; the module logs to the Console, notifies the user, and resets state to IDLE.
+- **`stream.sh` / `stream-server.sh` not found, or model missing** → `hs.task` exit callback fires with a non-zero exit code; the module logs to the Console, notifies the user, and resets state to IDLE.
+- **whisper-server takes too long to bind** → the first poll tick may race with a not-yet-ready server; the POST is silently dropped and the next tick succeeds. UX: first transcript appears ~2–4s after PTT.
 - **Focused app is on the blocklist** → the hotkey is a no-op for that utterance; the menubar dropdown surfaces the reason ("streaming disabled for this app").
-- **Emission stream stalls** → state stays STREAMING; the user toggles off via the hotkey or the focus-loss policy stops it when they switch apps.
+- **Poll stalls** → state stays STREAMING; the user toggles off via the hotkey or the focus-loss policy stops it when they switch apps.
