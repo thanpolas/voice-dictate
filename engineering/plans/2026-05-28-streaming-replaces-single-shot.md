@@ -45,6 +45,39 @@ All five remain authoritative. The streaming code itself (`bin/stream.sh`, `voic
 - No changes to [`bin/stream.sh`][stream-sh], [`bin/dictate.sh`][dictate-sh], the splice mechanic, or any spike findings — D1–D4 + D6 are untouched.
 - The step 7 measurement checklist in [the spike log][spike-log] is still authoritative; "go/no-go on flipping `cfg.streaming_default = true`" is now moot because streaming is the *only* path, but the criteria (latency, flicker, accuracy regression, divergence skip, focus-loss stop, clipboard preservation) remain the right qualitative bar.
 
+## Journey log
+
+Running log of what was found in real-session testing and what changed in response. Newest entries at the bottom. The point is to make later sessions cheap to onboard — each entry pairs a symptom with the fix that addressed it.
+
+### 2026-05-28 ~21:15 — Cmd+Shift+S never fired
+
+First test of the original plan's D5 (separate `Cmd+Shift+S` hotkey). PTT still drove single-shot; the new hotkey did nothing. Hammerspoon Console had no error, the bind itself probably succeeded but some other global hotkey owns that chord on this machine.
+
+**Decision:** abandon D5. This plan was opened in response — streaming takes over Right Option + Cmd+Shift+D; Cmd+Shift+S is unbound.
+
+### 2026-05-28 ~21:34 — First splice attempt: ANSI leak + pattern crash
+
+After the rewire, first real session against Claude Code's input. Two cascading bugs:
+
+1. **Shift+Cmd+Up on an empty prompt loaded the previous history entry** instead of selecting nothing. Splice was running the select-cut chain before any text had been pasted. Fix: skip the select-cut on the first emission of a session ([`voice-dictate-splice.lua`][splice-lua] `spliceCycle`).
+2. **`malformed pattern (missing ']')` from `cut:gsub(lastPastedDictationText, ...)`.** Whisper-stream renders its stdout in-place with CSI escapes (`\e[2K` to clear-line, etc.); the ESC byte is invisible in the Console but the `[2K` payload leaked into emissions and became the anchor substring on a later cycle. Lua's gsub interprets `[` as the start of a character class. Fixes: reinstate `stripAnsi` in [`voice-dictate-stream.lua`][stream-lua]'s `cleanEmission` (function had been deleted with the single-shot Lua); switch the splice replace from `gsub` to `find(plain=true)` + sub-based concat so pattern magic in the anchor can never reach a pattern matcher.
+
+Also added per-line `[vd-stream] emit:` / `skip:` console traces so the diagnostic loop is "open the Console, see what whisper actually said" instead of guessing.
+
+### 2026-05-28 ~21:40 — Splice loses content; switching to append-only
+
+With ANSI fixed and traces on, the field showed only the *last* emission's text — everything spoken earlier was gone. whisper-stream's step-mode emissions over a 5s window with `ggml-large-v3` + Greek are not stable revisions; successive emissions are largely-disjoint transcripts of overlapping audio, and the splice happily replaced each with the next. The last emission was itself a hallucination ("Υπότιτλοι AUTHORWAVE" = whisper falling back to subtitle-training-data patterns when context is thin).
+
+**Decision:** flip the default to the [Spike 1 append-only fallback][stream-plan]. `appendCycle` now inserts a space between emissions; `stream_append_only = true` becomes the install-written default; existing configs that explicitly set `false` are respected.
+
+### 2026-05-28 ~21:40 — Append works; transcription quality is bad regardless
+
+With append-only on, every real emission lands in the field — confirmed via Console traces. Problem: the *content* of those emissions is mostly hallucination. ~10% of words spoken in Greek made it through correctly. 5s windows with `ggml-large-v3` + Greek + no `--prompt` priming = whisper falling back to "common-sounding" Greek tokens unrelated to the input.
+
+**Lever 1 (not taken yet):** bump `STREAM_LENGTH_MS` from 5000 to 10000 — more context per emission. Cost: slower per-emission inference, less "live" feel.
+
+**Lever 2 (taken):** switch the model from `ggml-large-v3.bin` (3.0 GB, slow) to `ggml-large-v3-turbo-q5_0.bin` (547 MB, 2-3× faster on M1, comparable quality). The turbo file was already on disk at `~/whisper-models/`. Edited `bin/config.local.sh`'s `MODEL_PATH` to point at it. `hs.reload()` picks it up since dictate.sh sources the local config on every spawn.
+
 [stream-plan]: 2026-05-26-streaming-transcription.md
 [spike-log]: 2026-05-26-streaming-spike-log.md
 [dictate-sh]: ../../bin/dictate.sh
@@ -52,4 +85,6 @@ All five remain authoritative. The streaming code itself (`bin/stream.sh`, `voic
 [lua]: ../../hammerspoon/voice-dictate.lua
 [stream-mode-lua]: ../../hammerspoon/voice-dictate-stream-mode.lua
 [menu-lua]: ../../hammerspoon/voice-dictate-menu.lua
+[splice-lua]: ../../hammerspoon/voice-dictate-splice.lua
+[stream-lua]: ../../hammerspoon/voice-dictate-stream.lua
 [config-sh]: ../../install/config.sh
