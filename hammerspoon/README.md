@@ -5,9 +5,11 @@ Lua files loaded via the user's `~/.hammerspoon/init.lua` (which requires the ma
 - [voice-dictate.lua](voice-dictate.lua) — main entry. Hotkeys, state machine, single-shot recording, paste.
 - [voice-dictate-menu.lua](voice-dictate-menu.lua) — menubar command center: the idle icon, the dropdown, the recording title, the spinner.
 - [voice-dictate-mic.lua](voice-dictate-mic.lua) — mic picker. Scans avfoundation inputs, persists choice via `hs.settings`, builds the Microphone submenu.
-- [voice-dictate-stream.lua](voice-dictate-stream.lua) — opt-in streaming mode. Long-lived `bin/stream.sh`, clipboard-mediated splice, focus-loss stop. Bound to a separate hotkey from the single-shot toggle.
+- [voice-dictate-stream.lua](voice-dictate-stream.lua) — opt-in streaming mode: stdout consumer for `bin/stream.sh`. Stateless splice-wise; pairs with voice-dictate-splice.lua.
+- [voice-dictate-splice.lua](voice-dictate-splice.lua) — clipboard-mediated splice paste layer. Per-emission `Shift+Cmd+Up` / `Cmd+X` / modify / `Cmd+V` with D3 divergence skip, D4 clipboard preservation, D6 focus-loss stop.
+- [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua) — orchestrator. Binds the streaming hotkey and composes stream + splice; the single-shot path in [voice-dictate.lua](voice-dictate.lua) is untouched.
 
-All four files must live in `~/.hammerspoon/` so Lua's `require()` can resolve the siblings — `install.sh` symlinks every `hammerspoon/*.lua`.
+All six files must live in `~/.hammerspoon/` so Lua's `require()` can resolve the siblings — `install.sh` symlinks every `hammerspoon/*.lua`.
 
 ## [voice-dictate.lua](voice-dictate.lua)
 
@@ -50,6 +52,10 @@ Sourced from `~/.hammerspoon/voice-dictate-config.lua`, written by `install.sh`.
 | `right_alt_keycode` | `61` | Filters the flagsChanged eventtap. Left Option is `58`. |
 | `flush_delay_s` | `0.2` | Delay after SIGTERM before reading the WAV. Bump if recordings look truncated. |
 | `hide_hammerspoon_icon` | `true` | Hide Hammerspoon's own menu icon so the Dikta item is the sole control surface. Set `false` to keep it. |
+| `stream_sh` | absolute path to `bin/stream.sh` (derived at install time) | Streaming-mode shell entry point invoked by the orchestrator. |
+| `stream_toggle_mods` | `{"cmd", "shift"}` | Modifiers for the streaming-mode toggle hotkey. |
+| `stream_toggle_key` | `"S"` | Key paired with `stream_toggle_mods`. Distinct from `toggle_key` so the two modes coexist. |
+| `stream_append_only` | `false` | Skip the splice substring-replace and just append the delta — Spike 1 fallback when whisper-stream emissions are non-revisable. |
 
 ### Failure modes
 
@@ -120,9 +126,13 @@ mic.buildMicMenu()     -- builds menu items for hs.menubar:setMenu(); rescans on
 
 CLAUDE.md's 200 soft / 300 hard line cap applies per file. The command-center extraction moved all menubar presentation out of the main module into [voice-dictate-menu.lua](voice-dictate-menu.lua), keeping each module under the cap. The opt-in streaming mode lives in its own sibling [voice-dictate-stream.lua](voice-dictate-stream.lua) for the same reason. Future split triggers: an on-pointer cursor loader or cursor-lock async paste would each justify another sibling.
 
-## [voice-dictate-stream.lua](voice-dictate-stream.lua)
+## Streaming mode — voice-dictate-stream-mode.lua, voice-dictate-stream.lua, voice-dictate-splice.lua
 
-Opt-in streaming mode. Owns the long-lived `bin/stream.sh` task, the clipboard-mediated splice into the focused field, the focus-loss stop, and the per-app blocklist. The single-shot path in [voice-dictate.lua](voice-dictate.lua) is untouched — the two modes share no runtime state.
+Three siblings cooperate to deliver the opt-in streaming pipeline. The single-shot path in [voice-dictate.lua](voice-dictate.lua) is untouched — the two modes share no runtime state.
+
+- [voice-dictate-stream.lua](voice-dictate-stream.lua) — stdout consumer. Spawns `bin/stream.sh` via `hs.task`, splits the line-delimited emissions, strips `[Start speaking]` markers, dispatches cleaned lines to a caller-registered emission handler. Knows nothing about pasting.
+- [voice-dictate-splice.lua](voice-dictate-splice.lua) — the splice paste layer. Owns the per-emission keystroke chain, the D3 divergence skip, the D4 clipboard snapshot/restore, and the D6 focus-loss subscription.
+- [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua) — orchestrator. Binds the streaming hotkey; on tap, starts the splice session, registers `splice.applyEmission` as the stream's emission handler, and starts the stream. On second tap (or focus loss), unwinds in reverse.
 
 ### State machine
 
@@ -150,15 +160,7 @@ Cursor lands at end-of-paste — equivalent to live-typing. Pre-existing content
 
 ### Configurable values
 
-Sourced from `~/.hammerspoon/voice-dictate-config.lua`, written by `install.sh`. Defaults ship dormant — streaming-specific keys are optional in the config; the module falls back to the values below when absent so existing configs do not need updating.
-
-| Field | Default | Purpose |
-|-------|---------|---------|
-| `stream_sh` | derived from `dictate_sh` (sibling `stream.sh`) | Path to the streaming shell entry point. |
-| `stream_toggle_mods` | `{"cmd", "shift"}` | Modifiers for the streaming hotkey. |
-| `stream_toggle_key` | `"S"` | Key paired with the streaming modifiers. Distinct from the single-shot toggle key. |
-| `stream_append_only` | `false` | Skip the substring-replace step and just append the delta — the Spike 1 fallback when whisper-stream emissions don't revise overlapping audio. |
-| `stream_blocklist` | `{slack, notion, mail-compose}` (documented-by-design rich-text excludes) | Bundle IDs where streaming refuses to engage. Splice + rich text yields RTF/HTML the layer can't modify. |
+The streaming-mode config keys are listed in the main "Configurable values" table for [voice-dictate.lua](voice-dictate.lua) above (`stream_sh`, `stream_toggle_mods`, `stream_toggle_key`, `stream_append_only`). All four are optional — modules fall back to defaults when keys are absent, so configs written before streaming landed continue to work without an install rerun.
 
 ### Divergence-skip rule (D3)
 

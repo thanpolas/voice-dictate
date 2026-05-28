@@ -49,6 +49,11 @@ local mic = require("voice-dictate-mic")
 --- See voice-dictate-menu.lua.
 local menu = require("voice-dictate-menu")
 
+--- Opt-in streaming-mode orchestrator — owns its own hotkey + state, does
+--- not share runtime state with the single-shot path. See
+--- voice-dictate-stream-mode.lua.
+local streamMode = require("voice-dictate-stream-mode")
+
 -- ───── module state ─────────────────────────────────────────────────────────
 
 --- True between startRecording() and stopRecording().
@@ -265,14 +270,18 @@ function M.start()
     hideHsIcon = HIDE_HS_ICON,
   })
   bindHotkeys()
+  streamMode.start(cfg)
   print("voice-dictate: ready (PTT = Right Option, Toggle = " ..
-    table.concat(TOGGLE_MODS, "+") .. "+" .. TOGGLE_KEY .. ")")
+    table.concat(TOGGLE_MODS, "+") .. "+" .. TOGGLE_KEY ..
+    ", Stream = " .. table.concat(cfg.stream_toggle_mods or {"cmd","shift"}, "+") ..
+    "+" .. (cfg.stream_toggle_key or "S") .. ")")
 end
 
 --- Tear down hotkeys + command center + any in-flight recording. Safe to repeat.
 --- Does not restore Hammerspoon's menu icon (see menubar command-center plan D3).
 function M.stop()
   unbindHotkeys()
+  streamMode.stop()
   menu.unmount()
   if recordTask then recordTask:terminate(); recordTask = nil end
   recording = false
