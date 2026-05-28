@@ -102,26 +102,22 @@ init: obtained spec for input device (SDL Id = 2):
 
 `-1` (whisper-stream's "use SDL2 default") resolved to **device #2: BlackHole 2ch** — a virtual loopback that captures desktop audio, not the mic. Every previous session, whisper was transcribing system silence and whatever audio was playing on the Mac. avfoundation's default (used by ffmpeg for the single-shot path) was always the right mic; SDL2 enumerates independently and picked the loopback.
 
-**Decision:** set `STREAM_CAPTURE_ID=1` in `bin/config.local.sh` to pin whisper-stream to the actual mic. The config file is gitignored and user-specific, which is the right home — SDL2 device ordering is per-machine. Long-term follow-up: `install.sh` should list SDL2 devices and prompt for the capture ID, the same way it does for ffmpeg's `AUDIO_DEVICE` via the menubar picker; out of scope for this session.
+**Decision:** set `STREAM_CAPTURE_ID=3` in `bin/config.local.sh` to pin whisper-stream to device #3 `iMac Microphone` — the user's actual input. (Initially mis-pinned to #1 `iPhone Microphone` based on the name reading like a personal device; user corrected — that one is an older Bluetooth headset that isn't in use.) The config file is gitignored and user-specific, which is the right home — SDL2 device ordering is per-machine. Long-term follow-up: `install.sh` should list SDL2 devices and prompt for the capture ID, the same way it does for ffmpeg's `AUDIO_DEVICE` via the menubar picker; out of scope for this session.
 
 ## Test fixture for repeatable comparisons
 
 For meaningful before/after testing across config changes, read the same Greek text aloud each time. Same words, same pace, same mic position — that way an emission table actually shows whether the change helped.
 
 ```
-Δοκιμή υπαγόρευσης φωνής. Το voice-dictate τρέχει streaming μέσω whisper-stream
-και η εμφάνιση του κειμένου γίνεται ζωντανά στο πεδίο. Στόχος είναι μια
-καθαρή μεταγραφή χωρίς ψευδαισθήσεις. Πρώτη πρόταση, δεύτερη πρόταση,
-τρίτη πρόταση. Τέλος δοκιμής.
+Δοκιμή ένα, δύο, τρία. Πρώτη πρόταση, δεύτερη πρόταση. Τέλος δοκιμής.
 ```
 
-Rough translation, for diff-checking against emissions: "Voice dictation test. voice-dictate runs streaming through whisper-stream and the text appears live in the field. The goal is a clean transcription without hallucinations. First sentence, second sentence, third sentence. End of test."
+~5 seconds at normal pace. Picked these properties on purpose:
 
-Properties that make this a useful fixture:
-- Mixes Greek with English technical terms (`voice-dictate`, `streaming`, `whisper-stream`) — matches the real workload of dictating prompts into Claude Code etc.
-- Has clear sentence boundaries — surfaces how the splice / append cycles handle punctuation.
-- "Πρώτη / δεύτερη / τρίτη πρόταση" is an explicit token sequence that's easy to spot in the emission log; if those land correctly, ordering + window-overlap dedup is working.
-- ~15 seconds at normal speaking pace — long enough to produce 4-6 emissions at 10s window / ~2s emission interval, short enough to repeat without fatigue.
+- "ένα, δύο, τρία" are unambiguous numerals — if whisper mangles those, audio quality / mic / model is the bottleneck, not Greek phonetic ambiguity.
+- "Πρώτη / δεύτερη πρόταση" gives an ordered token pair — easy to spot in the emission log and tells us if window-overlap dedup is working when it lands twice.
+- "Τέλος δοκιμής" closes deterministically — useful for confirming the session captured the tail.
+- Short enough to repeat 5-10 times in a row without losing patience or going off-script.
 
 [stream-plan]: 2026-05-26-streaming-transcription.md
 [spike-log]: 2026-05-26-streaming-spike-log.md
