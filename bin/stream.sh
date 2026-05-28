@@ -1,29 +1,27 @@
 #!/usr/bin/env bash
-# @fileoverview voice-dictate streaming entry point — long-lived whisper-stream.
+# @fileoverview voice-dictate streaming capture — continuous ffmpeg recording.
 #
 # Subcommands:
-#   stream    Launch whisper-stream in step mode; emit raw lines on stdout
-#             until SIGINT/SIGTERM. Consumed by hammerspoon/voice-dictate-stream.lua.
+#   record <wav-path>  Capture mic to WAV until SIGTERM/SIGINT, same flags as
+#                      bin/dictate.sh record. Hammerspoon owns the WAV path
+#                      and signals shutdown when the session ends.
 #
-# Sibling of bin/dictate.sh — single-shot record/transcribe is unchanged. This
-# script owns the opt-in streaming path: a long-lived whisper-stream process
-# emits revisable transcription hypotheses every STREAM_STEP_MS over the most
-# recent STREAM_LENGTH_MS of audio. The Lua paste layer splices each emission
-# into the focused field via Shift+Cmd+Up / Cmd+X / modify clipboard / Cmd+V.
-# See engineering/plans/2026-05-26-streaming-transcription.md for the contract.
+# Sibling of bin/dictate.sh, sharing its AVFoundation capture path so the same
+# Voice Processing IO unit (AGC, noise suppression, echo cancellation) runs
+# under both single-shot and streaming. Earlier streaming used whisper-stream
+# (SDL2), which bypassed that DSP and produced unusable transcripts from the
+# iMac internal mic. See engineering/plans/2026-05-28-ffmpeg-streaming-rebuild.md.
 #
-# Runtime config (MODEL_PATH, LANGUAGE, THREADS) is sourced from the same
-# bin/config.local.sh the single-shot path uses. Streaming-specific knobs
-# (STREAM_STEP_MS, STREAM_LENGTH_MS, STREAM_KEEP_MS, STREAM_CAPTURE_ID) take
-# defaults locally so existing config.local.sh files don't need updating.
+# Runtime config (LANGUAGE, AUDIO_DEVICE) is sourced from bin/config.local.sh —
+# the same file the single-shot path uses, so mic selection is one knob.
 #
 # Exit codes: 0 on clean shutdown, 1 on usage / missing config, propagated
-# child exit code on whisper-stream failure.
+# child exit code on ffmpeg failure.
 
 set -euo pipefail
 
 # Hammerspoon-spawned tasks inherit a minimal PATH; ensure Homebrew binaries
-# (whisper-stream, whisper-cli) are reachable regardless of caller environment.
+# (ffmpeg) are reachable regardless of caller environment.
 export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 
 # ───── local config ──────────────────────────────────────────────────────────
@@ -42,69 +40,46 @@ fi
 # shellcheck source=/dev/null
 source "${LOCAL_CONFIG}"
 
-# Lock the values shared with the single-shot path. THREADS is reused as-is;
-# whisper-stream accepts the same -t flag whisper-cli does.
-readonly MODEL_PATH LANGUAGE THREADS
-
-# Audio step size in ms — how often whisper-stream emits the current transcript
-# of the rolling window. 500ms is the threshold where revisions feel live
-# without thrashing the splice layer; the binary's own default 3000ms is too
-# slow for the "text appears while I speak" UX this plan targets.
-: "${STREAM_STEP_MS:=500}"
-readonly STREAM_STEP_MS
-
-# Length of the rolling audio window in ms — how much recent audio the model
-# reconsiders on each emission. 10s gives whisper enough context to anchor on
-# (5s starved large-v3 of context and produced subtitle-style hallucinations
-# in Greek); turbo keeps per-emission inference fast enough at this size to
-# still feel live on M-series.
-: "${STREAM_LENGTH_MS:=10000}"
-readonly STREAM_LENGTH_MS
-
-# Audio carried from the previous step in ms — boundary continuity so the
-# leading words of a new window aren't re-segmented from a partial syllable.
-: "${STREAM_KEEP_MS:=200}"
-readonly STREAM_KEEP_MS
-
-# SDL2 capture device ID consumed by whisper-stream's --capture flag. NOT the
-# same as ffmpeg's avfoundation MIC_INDEX (different libraries, different
-# ordering). -1 = SDL2 default; user-facing calibration is documented in
-# bin/README.md and engineering/plans/2026-05-26-streaming-spike-log.md.
-: "${STREAM_CAPTURE_ID:=-1}"
-readonly STREAM_CAPTURE_ID
+# Lock the values shared with the single-shot path.
+readonly AUDIO_DEVICE
 
 # ───── subcommands ────────────────────────────────────────────────────────────
 
-# Launch whisper-stream in step mode; emit raw stdout lines until killed.
-# Exec replaces this shell with whisper-stream so SIGTERM from Hammerspoon
-# reaches the binary directly — there is no avfoundation-style signal latency
-# to mediate, SDL2 capture cleans up on process exit, and there is no WAV
-# trailer to flush. One process, one consumer, no wrapper.
-function stream() {
-  if [[ ! -f "${MODEL_PATH}" ]]; then
-    echo "stream: model not found at ${MODEL_PATH}" >&2
-    return 1
-  fi
-  exec whisper-stream \
-    --model "${MODEL_PATH}" \
-    --language "${LANGUAGE}" \
-    --threads "${THREADS}" \
-    --step "${STREAM_STEP_MS}" \
-    --length "${STREAM_LENGTH_MS}" \
-    --keep "${STREAM_KEEP_MS}" \
-    --capture "${STREAM_CAPTURE_ID}" \
-    --keep-context
+# Record audio from the configured AVFoundation device to <wav-path> until
+# SIGTERM/SIGINT. Same bash-wrapper-forwards-SIGINT-to-ffmpeg dance as
+# dictate.sh's record subcommand — ffmpeg flushes the WAV trailer on SIGINT
+# and exits 0, so the file is always playable. Hammerspoon's hs.task is the
+# parent and signals via SIGTERM at session end.
+function record() {
+  local wav="${1:?usage: stream.sh record <wav-path> [device]}"
+  local device="${2:-${AUDIO_DEVICE}}"
+  local log="${wav%.wav}.log"
+  echo "stream: record start wav=${wav} device=${device}" > "${log}"
+  # See bin/dictate.sh's record for the full rationale on the bash-wrapper
+  # SIGINT forwarding and the explicit </dev/null stdin redirect; this path
+  # mirrors that contract so the same end-to-end shutdown tests cover it.
+  ffmpeg -hide_banner -y \
+    -f avfoundation -i "${device}" \
+    -ar 16000 -ac 1 -acodec pcm_s16le \
+    "${wav}" 2>> "${log}" </dev/null &
+  local ffmpeg_pid="${!}"
+  echo "stream: ffmpeg pid=${ffmpeg_pid}" >> "${log}"
+  trap "kill -INT ${ffmpeg_pid} 2>/dev/null || true" TERM INT
+  while kill -0 "${ffmpeg_pid}" 2>/dev/null; do
+    wait "${ffmpeg_pid}" 2>/dev/null || true
+  done
+  echo "stream: ffmpeg exited" >> "${log}"
 }
 
 # ───── entry point ────────────────────────────────────────────────────────────
 
 # Dispatch first positional argument to the matching subcommand.
 function main() {
-  local cmd="${1:-stream}"
+  local cmd="${1:-}"
   case "${cmd}" in
-    stream) shift || true; stream "$@" ;;
+    record) shift; record "$@" ;;
     *)
-      echo "usage: stream.sh [stream]" >&2
+      echo "usage: stream.sh record <wav-path> [device]" >&2
       exit 1
       ;;
   esac
