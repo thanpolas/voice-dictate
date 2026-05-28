@@ -46,15 +46,23 @@ local onEmission = function(_line) end
 
 -- ───── stdout consumption ───────────────────────────────────────────────────
 
---- Strip the [Start speaking] readiness marker and any leading/trailing
---- whitespace from a raw whisper-stream emission. Returns nil when the line
---- has nothing useful left (so callers can skip it without a second check).
+--- Strip the [Start speaking] readiness marker, leading/trailing whitespace,
+--- and any whisper-stream non-speech markers (`[BLANK_AUDIO]`, `(silence)`,
+--- `(soft music)`, etc.). Returns nil when nothing useful remains. Skipping
+--- markers at this layer means the splice layer's "first emission" detection
+--- (lastPastedDictationText == "") stays accurate — a non-speech marker
+--- pasted as the first emission would otherwise commit garbage and push
+--- subsequent splice cycles down the Shift+Cmd+Up path on a still-empty field.
 --- @param raw string One line of whisper-stream stdout as Hammerspoon delivered it.
---- @return string|nil The cleaned emission, or nil if the line is empty after cleaning.
+--- @return string|nil The cleaned emission, or nil if the line is empty / marker-only.
 local function cleanEmission(raw)
   local clean = raw:gsub(READY_MARKER, "")
   clean = clean:gsub("^%s+", ""):gsub("%s+$", "")
-  if clean == "" then return nil end
+  -- Strip a line that is entirely bracketed/parenthesized markers + punctuation:
+  -- remove all [..] and (..) blocks, then any leftover whitespace and dots.
+  -- If nothing remains, the line was a non-speech artefact.
+  local residue = clean:gsub("%b[]", ""):gsub("%b()", ""):gsub("[%s%.]+", "")
+  if residue == "" then return nil end
   return clean
 end
 
@@ -70,7 +78,12 @@ local function onStdout(_task, stdOut, _stdErr)
   if not stdOut or stdOut == "" then return true end
   for line in stdOut:gmatch("[^\r\n]+") do
     local clean = cleanEmission(line)
-    if clean then onEmission(clean) end
+    if clean then
+      print("[vd-stream] emit: " .. clean)
+      onEmission(clean)
+    else
+      print("[vd-stream] skip: " .. line)
+    end
   end
   return true
 end
