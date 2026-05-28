@@ -33,10 +33,10 @@ readonly VD_LUA_CONFIG="${VD_HAMMERSPOON_DIR}/voice-dictate-config.lua"
 # Project-local artifact store; install.sh creates it on first run.
 readonly VD_LOCAL_MODELS_DIR="${REPO_ROOT}/.local/models"
 
-# Default model filename, used when downloading and as the fallback destination.
-readonly VD_DEFAULT_MODEL_FILENAME="ggml-large-v3-turbo-q5_0.bin"
-
 # Default language for the Whisper transcription — Greek primary per spec.
+# VD_DEFAULT_MODEL_FILENAME is declared in install/model.sh and reaches us
+# via the source line below; declaring it here would double-readonly under
+# set -e and abort the script.
 readonly VD_DEFAULT_LANGUAGE="el"
 
 # Source every helper so their public functions are in scope. lib.sh is
