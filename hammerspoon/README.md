@@ -26,12 +26,12 @@ The installer appends `require("voice-dictate").start()` to `init.lua`. Nothing 
 ### State machine
 
 ```
-IDLE ──Cmd+Shift+D tap─► RECORDING ──Cmd+Shift+D tap─┐
+IDLE ──Cmd+Shift+D tap─► STREAMING ──Cmd+Shift+D tap─┐
                             │                         │
-                            └─ Right Option release ──┴─► TRANSCRIBING ─► IDLE
+                            └─ Right Option release ──┴─► IDLE
 ```
 
-One state variable (`recording`) is shared by both hotkeys. Pressing the toggle while PTT-recording (or vice versa) collapses to "stop": last hotkey wins. Acceptable for v0.1.
+Session state lives in [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua); both hotkeys flip it via the same `startSession`/`stopSession` calls. Pressing the toggle while PTT-streaming (or vice versa) collapses to "stop": last hotkey wins. There is no separate "transcribing" state — emissions arrive continuously and paste live; release means stop.
 
 ### Why two hotkey mechanisms
 
@@ -46,26 +46,23 @@ Sourced from `~/.hammerspoon/voice-dictate-config.lua`, written by `install.sh`.
 
 | Field | Default | Purpose |
 |-------|---------|---------|
-| `dictate_sh` | absolute path derived at install time | Path to the shell entry point. |
+| `dictate_sh` | absolute path derived at install time | Single-shot shell entry point — kept for ad-hoc use; no hotkey reaches it. |
 | `toggle_mods` | `{"cmd", "shift"}` | Modifiers for the toggle hotkey. |
 | `toggle_key` | `"D"` | Key paired with the toggle modifiers. |
 | `right_alt_keycode` | `61` | Filters the flagsChanged eventtap. Left Option is `58`. |
-| `flush_delay_s` | `0.2` | Delay after SIGTERM before reading the WAV. Bump if recordings look truncated. |
 | `hide_hammerspoon_icon` | `true` | Hide Hammerspoon's own menu icon so the Dikta item is the sole control surface. Set `false` to keep it. |
-| `stream_sh` | absolute path to `bin/stream.sh` (derived at install time) | Streaming-mode shell entry point invoked by the orchestrator. |
-| `stream_toggle_mods` | `{"cmd", "shift"}` | Modifiers for the streaming-mode toggle hotkey. |
-| `stream_toggle_key` | `"S"` | Key paired with `stream_toggle_mods`. Distinct from `toggle_key` so the two modes coexist. |
+| `stream_sh` | absolute path to `bin/stream.sh` (derived at install time) | Streaming shell entry point invoked by the orchestrator. |
 | `stream_append_only` | `false` | Skip the splice substring-replace and just append the delta — Spike 1 fallback when whisper-stream emissions are non-revisable. |
 
 ### Failure modes
 
-- **Transcript empty** → `hs.notify` toast + log to Hammerspoon Console. No paste fired. State resets clean.
-- **`dictate.sh` not found** → `hs.execute` returns nil; transcript empty path triggers.
-- **`hs.task` start fails** → log error, state stays IDLE. Confirm `dictate_sh` in `voice-dictate-config.lua` is executable.
+- **`stream.sh` exits non-zero** → log to the Hammerspoon Console, reset state to IDLE.
+- **Focus leaves the field mid-session** → D6 self-stop fires: kill whisper-stream, restore the clipboard snapshot, no further pastes. User re-triggers explicitly.
+- **`hs.task` start fails** → log error, state stays IDLE. Confirm `stream_sh` in `voice-dictate-config.lua` is executable.
 
 ### Reload safety
 
-`M.start()` calls `M.stop()` first, so `hs.reload()` is always safe. Eventtaps, hotkeys, menubar item, and any in-flight record task are all torn down before re-binding. No accumulation across reloads.
+`M.start()` calls `M.stop()` first, so `hs.reload()` is always safe. Eventtaps, hotkeys, menubar item, and any in-flight streaming task are all torn down before re-binding. No accumulation across reloads.
 
 ## [voice-dictate-menu.lua](voice-dictate-menu.lua)
 
@@ -74,7 +71,7 @@ The menubar command center — the single control surface. `M.start()` hides Ham
 ### Dropdown
 
 ```
-Dikta — Idle / Recording… / Transcribing…   (status header, disabled)
+Dikta — Idle / Streaming…   (status header, disabled)
 ────────────
 Start / Stop Dictation       ⌘⇧D
 ────────────
@@ -86,13 +83,12 @@ Reload Config                → hs.reload()
 Show Hammerspoon Menu Icon   → hs.menuIcon(true)
 ```
 
-Registered as a callback, so it re-reads recording/transcribing state and re-scans mics on every open. Driven by a control table injected from the main module (`onToggle`, `isRecording`, `onOpenConsole`, `onReload`, `onShowHsIcon`, `hotkeyHint`, `hideHsIcon`) — no circular `require` back into the main module.
+Registered as a callback, so it re-reads streaming state and re-scans mics on every open. Driven by a control table injected from the main module (`onToggle`, `isStreaming`, `onOpenConsole`, `onReload`, `onShowHsIcon`, `hotkeyHint`, `hideHsIcon`) — no circular `require` back into the main module.
 
 ### Menubar states
 
 - **Idle** — the Dikta spoken-mark, rendered in code via `hs.canvas` → `imageFromCanvas()` → `setIcon(image, true)` (template, so macOS auto-inverts for light/dark). Geometry mirrors [../brand/dikta-mark.svg](../brand/dikta-mark.svg). Falls back to the `○` text glyph if the canvas image fails.
-- **Recording** — `● REC` title, icon cleared.
-- **Transcribing** — the braille spinner (`⠋⠙⠹…`, 80ms), title-based, icon cleared.
+- **Streaming** — `● LIVE` title, icon cleared.
 
 ### Hiding Hammerspoon's icon — recovery path
 

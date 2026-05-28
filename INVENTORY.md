@@ -35,12 +35,12 @@ Shell-side recorder and transcriber. Leaf README: [bin/README.md](bin/README.md)
 
 Lua module loaded from the user's `~/.hammerspoon/init.lua`. Leaf README: [hammerspoon/README.md](hammerspoon/README.md).
 
-- [hammerspoon/voice-dictate.lua](hammerspoon/voice-dictate.lua) — Hotkey handlers, state machine, recording, paste. Public API: `M.start()` / `M.stop()`.
-- [hammerspoon/voice-dictate-menu.lua](hammerspoon/voice-dictate-menu.lua) — Menubar command center: idle icon, dropdown, recording title, spinner; hides Hammerspoon's icon.
+- [hammerspoon/voice-dictate.lua](hammerspoon/voice-dictate.lua) — Hotkey handlers (PTT + toggle) driving streaming via voice-dictate-stream-mode. Public API: `M.start()` / `M.stop()`.
+- [hammerspoon/voice-dictate-menu.lua](hammerspoon/voice-dictate-menu.lua) — Menubar command center: idle icon, dropdown, `● LIVE` streaming title; hides Hammerspoon's icon.
 - [hammerspoon/voice-dictate-mic.lua](hammerspoon/voice-dictate-mic.lua) — Mic picker: avfoundation device scan, Microphone submenu, NSUserDefaults persistence.
 - [hammerspoon/voice-dictate-stream.lua](hammerspoon/voice-dictate-stream.lua) — Streaming stdout consumer: spawns bin/stream.sh, splits emissions, dispatches cleaned lines to a registered handler.
 - [hammerspoon/voice-dictate-splice.lua](hammerspoon/voice-dictate-splice.lua) — Clipboard-mediated splice paste layer; owns D3 divergence skip, D4 clipboard preservation, D6 focus-loss stop.
-- [hammerspoon/voice-dictate-stream-mode.lua](hammerspoon/voice-dictate-stream-mode.lua) — Streaming hotkey orchestrator; composes voice-dictate-stream + voice-dictate-splice; called from voice-dictate.lua's M.start/M.stop.
+- [hammerspoon/voice-dictate-stream-mode.lua](hammerspoon/voice-dictate-stream-mode.lua) — Streaming session orchestrator; composes voice-dictate-stream + voice-dictate-splice into startSession/stopSession called from the main module's hotkeys.
 
 ## [brand/](brand/)
 

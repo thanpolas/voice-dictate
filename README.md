@@ -6,14 +6,12 @@
 
 Press a hotkey, speak, release/tap — transcript pastes into the focused text field. No cloud, no monthly fee, no audio leaves the machine.
 
-Two single-shot hotkeys (accuracy-first; record then transcribe then paste):
+Two hotkeys, both drive streaming dictation — text appears in the focused field while you keep speaking:
 
 - **Right Option (held)** — push-to-talk
 - **Cmd+Shift+D (tap)** — toggle start/stop
 
-Plus an opt-in streaming hotkey (liveness-first; text appears while you speak):
-
-- **Cmd+Shift+S (tap)** — start/stop streaming dictation. Plain-text fields only; trades accuracy for live-typing feel. See the [streaming-transcription plan][stream-plan] for the contract.
+Plain-text fields only; rich-text editors (Slack, Notion, Mail compose) are out of scope by design. See the [streaming-transcription plan][stream-plan] for the contract and [the supersession plan][stream-supersedes] for why streaming drives the same hotkeys single-shot used to.
 
 # Prerequisites
 
@@ -125,6 +123,7 @@ Copyright © [Thanos Polychronakis][thanpolas] and Authors, [Licensed under ISC]
 [spec-md]: engineering/plans/2026-05-20-v0.1-spec.md
 [spec-transcription]: engineering/plans/2026-05-20-v0.1-spec.md#transcription
 [stream-plan]: engineering/plans/2026-05-26-streaming-transcription.md
+[stream-supersedes]: engineering/plans/2026-05-28-streaming-replaces-single-shot.md
 [cde-md]: engineering/cde.md
 [claude-md]: CLAUDE.md
 [inventory-md]: INVENTORY.md

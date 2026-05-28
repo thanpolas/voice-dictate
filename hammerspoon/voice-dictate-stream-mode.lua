@@ -1,14 +1,13 @@
---- @fileoverview Streaming-mode orchestrator — binds the streaming hotkey,
---- composes voice-dictate-stream + voice-dictate-splice, and owns the focus-
---- loss wiring so the two halves stop together.
----
---- Sibling of the main voice-dictate.lua. The main module calls M.start(cfg)
---- from its own M.start() and M.stop() from its own M.stop(); the single-shot
---- path is untouched by this module.
+--- @fileoverview Streaming session orchestrator — composes voice-dictate-stream
+--- (stdout consumer) with voice-dictate-splice (paste layer) into a single
+--- session API. Owns no hotkeys of its own; the main module's existing PTT and
+--- toggle handlers call into M.startSession/M.stopSession directly.
 ---
 --- Public API:
----   M.start(cfg)  Bind the streaming hotkey from cfg. Idempotent.
----   M.stop()      Unbind the hotkey; stop any in-flight session. Safe to repeat.
+---   M.init()              Wire focus-loss self-stop. Call once from voice-dictate.lua's M.start().
+---   M.startSession(cfg)   Spawn whisper-stream + start the splice. Idempotent.
+---   M.stopSession()       Tear down the splice + kill whisper-stream. Safe to repeat.
+---   M.isActive()          True iff a session is currently running.
 
 local M = {}
 
@@ -18,63 +17,40 @@ local stream = require("voice-dictate-stream")
 --- Per-emission paste mechanic — owns the clipboard splice + focus stop.
 local splice = require("voice-dictate-splice")
 
--- ───── module state ─────────────────────────────────────────────────────────
+-- ───── public API ───────────────────────────────────────────────────────────
 
---- hs.hotkey binding for the streaming toggle; nil while unbound.
-local hotkey = nil
-
---- Cached config so the focus-loss callback can restart cleanly if needed.
-local currentCfg = nil
-
--- ───── orchestration ────────────────────────────────────────────────────────
-
---- Begin a streaming session: start the splice (which subscribes focus),
---- wire the emission handler, then spawn whisper-stream. Splice goes first
---- so the first emission has somewhere to land.
-local function startSession()
-  if stream.isStreaming() then return end
-  splice.startSession({append_only = currentCfg.stream_append_only})
-  stream.setEmissionHandler(splice.applyEmission)
-  stream.start(currentCfg)
+--- Wire the focus-loss self-stop once at module setup time. Splice fires the
+--- onStop hook from its hs.window.filter focus-change handler; we route that
+--- to stream.stop() so the whisper-stream process dies alongside the splice
+--- when focus leaves the field.
+function M.init()
+  splice.setOnStop(function() stream.stop() end)
 end
 
---- End a streaming session: kill whisper-stream, drop the emission handler,
---- then tear down the splice (which restores the clipboard).
-local function stopSession()
+--- Begin a streaming session. Splice goes first so the first emission lands
+--- in a session that has clipboard snapshot + focus subscription ready.
+--- @param cfg table Optional config — passes .stream_sh to stream, .stream_append_only to splice.
+function M.startSession(cfg)
+  if stream.isStreaming() then return end
+  splice.startSession({append_only = cfg and cfg.stream_append_only})
+  stream.setEmissionHandler(splice.applyEmission)
+  stream.start(cfg)
+end
+
+--- End a streaming session. Drops the emission handler before killing the
+--- task so any in-flight stdout doesn't hit a half-torn splice.
+function M.stopSession()
   stream.setEmissionHandler(nil)
   stream.stop()
   splice.stopSession()
 end
 
---- Hotkey handler — flip session state on each tap of the streaming chord.
-local function onStreamToggle()
-  if stream.isStreaming() or splice.isActive() then
-    stopSession()
-  else
-    startSession()
-  end
-end
-
--- ───── lifecycle ────────────────────────────────────────────────────────────
-
---- Bind the streaming hotkey + register the focus-loss self-stop hook.
---- Idempotent: prior bindings are torn down by M.stop() before re-binding.
---- @param cfg table Config table from voice-dictate-config.lua.
-function M.start(cfg)
-  M.stop()
-  currentCfg = cfg
-  splice.setOnStop(function() stream.stop() end)
-  local mods = cfg.stream_toggle_mods or {"cmd", "shift"}
-  local key = cfg.stream_toggle_key or "S"
-  hotkey = hs.hotkey.bind(mods, key, onStreamToggle)
-end
-
---- Unbind the streaming hotkey and stop any in-flight session.
---- Safe to call repeatedly; used by hs.reload() round-trips.
-function M.stop()
-  if hotkey then hotkey:delete(); hotkey = nil end
-  stopSession()
-  currentCfg = nil
+--- True iff either the whisper-stream task or the splice is currently
+--- active. Both should be live together; the OR is defensive against a
+--- race where one side has torn down but the other has not yet.
+--- @return boolean
+function M.isActive()
+  return stream.isStreaming() or splice.isActive()
 end
 
 return M
