@@ -30,10 +30,51 @@ Run [`spike-1-emit.sh`][spike-1], speak a long multi-clause utterance for ~20s, 
 
 The plan's [§ Decisions D2][plan-d2] is the authoritative table. Until the user confirms cadence and revision behaviour empirically, those defaults ship as-is and the append-only fallback ships dormant behind `STREAM_APPEND_ONLY=false`. The fallback flips to `true` only if Spike 1 returns append-only on this hardware.
 
+## Spike 2 — clipboard-mediated splice
+
+Script: [`tmp/streaming-spike/spike-2-splice.lua`][spike-2]. A standalone Hammerspoon snippet `dofile`-loaded into the Console. Exposes `spike2.run(old, new)` (one splice cycle) and `spike2.cycle({{old=,new=}, …})` (a sequence at the production cadence — 600ms gaps to approximate `--step 500` plus inference jitter). The user focuses each target in turn, calls the function, and notes the outcome.
+
+### Verified from the keystroke semantics
+
+- `Shift+Cmd+Up` is the documented macOS "extend selection to start of document" shortcut on native NSTextView / NSTextField surfaces. On single-line fields it collapses to "select to beginning of line," which still covers any text the splice could have pasted.
+- `Cmd+X` cut-on-empty-selection is a no-op (preserves clipboard); cut-on-non-empty replaces the clipboard with the cut text. Either way, the post-cut clipboard read returns the field's prefix.
+- `Cmd+V` round-trips plain-text clipboard contents byte-for-byte on plain-text targets. The plan's [§ Constraints][plan-constraints] excludes rich-text targets by design.
+- `hs.pasteboard.getContents()` blocks until the cut has populated NSPasteboard. The 80ms `usleep` between the `Cmd+X` keystroke and the `getContents()` read is generous insurance for slow apps; tighten if the spike shows headroom.
+
+### Deferred to user-run — target-field check list
+
+Run [`spike-2-splice.lua`][spike-2] with `spike2.run("hello world", "hello brave world")` and `spike2.cycle({{old="a",new="ab"},{old="ab",new="abc"},{old="abc",new="abcd"}})` against each:
+
+| Target | Cursor ends-of-paste? | Prefix preserved? | Flicker OK at 2 Hz? |
+|---|---|---|---|
+| Claude Code input (terminal) |  |  |  |
+| ChatGPT / Claude.ai chat input |  |  |  |
+| Terminal.app / iTerm prompt |  |  |  |
+| Browser address bar (Safari, Chrome) |  |  |  |
+| macOS Spotlight |  |  |  |
+| Native `NSTextField` (Finder rename) |  |  |  |
+| VS Code editor pane |  |  |  |
+| TextEdit (plain text mode) |  |  |  |
+
+### Per-app blocklist (initial)
+
+Any field that fails any column lands in the splice layer's blocklist set (`hammerspoon/voice-dictate-stream.lua` once it lands in step 5). Streaming refuses to engage when focused there ([D6 focus-loss policy][plan-d6] covers mid-session focus changes — startup-time focus check is the corresponding entry guard).
+
+Until the user runs Spike 2, the blocklist ships with the three documented-by-design exclusions from the plan's [§ Goal][plan-goal] / rich-text scope rule: Slack, Notion, and Mail/Gmail-compose (rich-text editors). These are scope-by-design, not spike-discovered.
+
+### Click-mid-stream behaviour
+
+The plan's [§ Risks][plan-risks] flags this as the ugliest divergence case. Spike 2's manual test: start `spike2.cycle(...)`, click elsewhere in the same field between pastes, confirm whether the next splice corrupts state or self-corrects via D3's substring-not-found skip. Decision: if it self-corrects on the next emission, no code change. If it corrupts, the streaming-mode README adds a "don't click mid-stream" caveat.
+
 [plan]: 2026-05-26-streaming-transcription.md
 [plan-d2]: 2026-05-26-streaming-transcription.md#decisions
+[plan-d6]: 2026-05-26-streaming-transcription.md#decisions
+[plan-goal]: 2026-05-26-streaming-transcription.md#goal
+[plan-constraints]: 2026-05-26-streaming-transcription.md#constraints
+[plan-risks]: 2026-05-26-streaming-transcription.md#risks
 [spike-dir]: ../../tmp/streaming-spike/
 [spike-1]: ../../tmp/streaming-spike/spike-1-emit.sh
+[spike-2]: ../../tmp/streaming-spike/spike-2-splice.lua
 [stream-sh]: ../../bin/stream.sh
 [lua-stream]: ../../hammerspoon/voice-dictate-stream.lua
 [claude]: ../../CLAUDE.md
