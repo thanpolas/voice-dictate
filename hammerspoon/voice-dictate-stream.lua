@@ -1,169 +1,164 @@
---- @fileoverview Opt-in streaming dictation — long-lived whisper-stream + splice.
+--- @fileoverview Streaming pipeline orchestrator — ffmpeg + whisper-server + timer.
 ---
---- Owns the streaming pipeline that is sibling to voice-dictate.lua's single-shot
---- record-then-transcribe path. A long-lived bin/stream.sh task emits one
---- transcription line every STREAM_STEP_MS over the rolling audio window; this
---- module consumes those lines and pastes them into the focused field via the
---- clipboard-mediated splice described in the streaming-transcription plan.
+--- Replaces the old whisper-stream/SDL2 stdout consumer. The new shape:
+---   1. bin/stream.sh records the focused mic to a session WAV via AVFoundation
+---      (so the Apple Voice Processing IO unit runs — see the ffmpeg rebuild plan).
+---   2. bin/stream-server.sh keeps whisper.cpp loaded as an HTTP daemon on
+---      loopback, so per-tick inference pays no model-load tax.
+---   3. An hs.timer fires every POLL_INTERVAL_S, finalises an ffmpeg snapshot
+---      of the in-progress WAV (whisper-server cannot parse the live file
+---      until ffmpeg writes the WAV trailer), POSTs the snapshot to /inference,
+---      parses the JSON, and dispatches the full transcript as a single
+---      emission to the caller-registered handler.
 ---
---- This file is step 4 of the plan: the wiring — spawn the task, consume stdout
---- line-by-line, log emissions. Step 5 adds the splice paste layer on top of
---- the seam established here. Step 6 wires the streaming hotkey through the
---- main module so M.start()/M.stop() compose with single-shot.
+--- The handler downstream is voice-dictate-splice.lua. Because each transcript
+--- is the model's reading of the *entire* session WAV up to that tick, the
+--- splice's substring-replace mechanic naturally handles revisions: prior
+--- transcript is the anchor in the field, new transcript replaces it.
 ---
 --- Public API:
----   M.start(cfg)   Spawn bin/stream.sh; subscribe to emissions. Idempotent.
----   M.stop()       Kill the task; reset state. Safe to repeat.
----   M.isStreaming() Read current state; used by the menubar dropdown.
+---   M.setEmissionHandler(fn)  Register the per-tick handler. Default no-op.
+---   M.start(cfg)              Boot server + ffmpeg + timer. Idempotent.
+---   M.stop()                  Tear down timer, ffmpeg, server. Safe to repeat.
+---   M.isStreaming()           Query state.
 
 local M = {}
 
 -- ───── constants ────────────────────────────────────────────────────────────
 
---- Default path to the streaming shell entry point. Overridden by cfg.stream_sh
---- when M.start() is called with an explicit config (install.sh writes the
---- absolute path into voice-dictate-config.lua just as it does dictate_sh).
+--- Repo-derived path to bin/stream.sh (record) and bin/stream-server.sh
+--- (start/stop). The streaming-mode caller's cfg overrides these if set.
 local DEFAULT_STREAM_SH = os.getenv("HOME") ..
   "/Projects/myStash/voice-dictate/bin/stream.sh"
+local DEFAULT_SERVER_SH = os.getenv("HOME") ..
+  "/Projects/myStash/voice-dictate/bin/stream-server.sh"
 
---- Marker whisper-stream prints to stderr when it is ready for audio input.
---- Stripped from any emission line that surfaces it so the splice layer never
---- sees binary noise as user-visible text.
-local READY_MARKER = "%[Start speaking%]"
+--- HTTP endpoint the daemon serves. Port matches stream-server.sh's default.
+local SERVER_URL = "http://127.0.0.1:8472/inference"
+
+--- Seconds between polls. 2s balances "feels live" vs whisper inference cost
+--- on M-series with large-v3-turbo over a growing session WAV.
+local POLL_INTERVAL_S = 2.0
+
+--- Repo-local scratch directory for the session WAV and the snapshot the
+--- poller hands to the server. Project rule: never /tmp (see CLAUDE.md
+--- § Scratch paths). Derived from DEFAULT_STREAM_SH by stripping /bin/<file>.
+local TMP_DIR = (DEFAULT_STREAM_SH:gsub("/bin/[^/]+$", "/tmp"))
+local SESSION_WAV = TMP_DIR .. "/stream-session.wav"
+local SNAPSHOT_WAV = TMP_DIR .. "/stream-snapshot.wav"
 
 -- ───── module state ─────────────────────────────────────────────────────────
 
---- True between M.start() and M.stop(); read by the menubar dropdown.
+--- True between M.start() and M.stop(); read by streamMode.isActive().
 local isStreaming = false
 
---- The hs.task running bin/stream.sh. Nil when idle.
-local streamTask = nil
+--- hs.task running bin/stream.sh record. Nil when idle.
+local ffmpegTask = nil
 
---- Optional caller-supplied hook invoked once per emission line. Step 5
---- replaces the default no-op with the splice paste handler. Kept as a setter
---- so step 5 can land without re-shaping the start() signature.
+--- hs.timer firing every POLL_INTERVAL_S. Nil when idle.
+local pollTimer = nil
+
+--- Last transcript text dispatched downstream — used as a dedup guard so
+--- identical successive polls don't re-fire the splice for no change.
+local lastDispatchedText = ""
+
+--- True while a poll cycle is in flight, so the next tick doesn't queue a
+--- second concurrent inference while inference for the prior is pending.
+local pollInFlight = false
+
+--- Caller-registered handler invoked once per cleaned transcript.
 local onEmission = function(_line) end
 
--- ───── stdout consumption ───────────────────────────────────────────────────
+-- ───── poll cycle ───────────────────────────────────────────────────────────
 
---- Strip ANSI/VT100 escape sequences. Whisper-stream renders its output
---- in-place with CSI codes (`\e[2K` clear-line, `\e[0;…` colour resets, …);
---- the ESC byte is invisible in most consoles but the bracketed payload
---- leaks into our emissions and (a) breaks Lua patterns when `[` appears
---- without a `]`, (b) shows up as garbage if pasted. Covers CSI, OSC,
---- charset designation, and 2-byte ESC <letter>.
---- @param s string Raw line possibly containing ANSI escapes.
---- @return string Same line with the escapes removed.
-local function stripAnsi(s)
-  return (s
-    :gsub("\27%[[%d;?]*[a-zA-Z]", "")
-    :gsub("\27%]%d+;[^\7\27]*\7", "")
-    :gsub("\27[%(%)%*%+][A-Za-z0-9]", "")
-    :gsub("\27[A-Za-z=>]", "")
-  )
+--- POST the snapshot WAV to whisper-server and dispatch the parsed transcript.
+--- Runs after the snapshot finalisation step completes successfully.
+local function postSnapshot()
+  local task = hs.task.new("/usr/bin/curl",
+    function(exit, stdout, _stderr)
+      pollInFlight = false
+      if exit ~= 0 or stdout == nil or stdout == "" then return end
+      local ok, parsed = pcall(hs.json.decode, stdout)
+      if not ok or type(parsed) ~= "table" or type(parsed.text) ~= "string" then
+        return
+      end
+      local text = parsed.text:gsub("^%s+", ""):gsub("%s+$", "")
+      if text == "" or text == lastDispatchedText then return end
+      lastDispatchedText = text
+      onEmission(text)
+    end,
+    {"-s", "-F", "file=@" .. SNAPSHOT_WAV, SERVER_URL})
+  task:start()
 end
 
---- Strip the [Start speaking] readiness marker, ANSI escapes, leading/trailing
---- whitespace, and any whisper-stream non-speech markers (`[BLANK_AUDIO]`,
---- `(silence)`, `(soft music)`, etc.). Returns nil when nothing useful remains.
---- Skipping markers at this layer means the splice layer's "first emission"
---- detection (lastPastedDictationText == "") stays accurate — a non-speech
---- marker pasted as the first emission would otherwise commit garbage and push
---- subsequent splice cycles down the Shift+Cmd+Up path on a still-empty field.
---- @param raw string One line of whisper-stream stdout as Hammerspoon delivered it.
---- @return string|nil The cleaned emission, or nil if the line is empty / marker-only.
-local function cleanEmission(raw)
-  local clean = stripAnsi(raw)
-  clean = clean:gsub(READY_MARKER, "")
-  clean = clean:gsub("^%s+", ""):gsub("%s+$", "")
-  -- Strip a line that is entirely bracketed/parenthesized markers + punctuation:
-  -- remove all [..] and (..) blocks, then any leftover whitespace and dots.
-  -- If nothing remains, the line was a non-speech artefact.
-  local residue = clean:gsub("%b[]", ""):gsub("%b()", ""):gsub("[%s%.]+", "")
-  if residue == "" then return nil end
-  return clean
+--- Finalise the in-progress session WAV into a snapshot the server can parse,
+--- then chain into the POST. Two hs.task spawns per tick (snapshot, POST) so
+--- neither blocks the Hammerspoon main thread.
+local function snapshotAndPost()
+  if pollInFlight then return end
+  pollInFlight = true
+  local task = hs.task.new("/opt/homebrew/bin/ffmpeg",
+    function(exit, _stdout, _stderr)
+      if exit ~= 0 then
+        pollInFlight = false
+        return
+      end
+      postSnapshot()
+    end,
+    {"-hide_banner", "-loglevel", "error", "-y",
+     "-i", SESSION_WAV, "-c", "copy", SNAPSHOT_WAV})
+  task:start()
 end
 
---- Stream callback wired into hs.task. Fires per chunk of stdout, which may
---- contain multiple emission lines glued together; split on newline and
---- forward each non-empty cleaned line to onEmission(). Returning true keeps
---- the task running and the stream open.
---- @param _task table The hs.task instance (unused — we have a module-level handle).
---- @param stdOut string Chunk of stdout since the last callback.
---- @param _stdErr string Chunk of stderr since the last callback (logged only).
---- @return boolean Always true — never close the stream from this side.
-local function onStdout(_task, stdOut, _stdErr)
-  if not stdOut or stdOut == "" then return true end
-  for line in stdOut:gmatch("[^\r\n]+") do
-    local clean = cleanEmission(line)
-    if clean then
-      print("[vd-stream] emit: " .. clean)
-      onEmission(clean)
-    else
-      print("[vd-stream] skip: " .. line)
-    end
-  end
-  return true
-end
+-- ───── lifecycle ────────────────────────────────────────────────────────────
 
---- Exit callback wired into hs.task. Fires when whisper-stream actually
---- terminates — either because the user toggled off (M.stop) or because the
---- binary crashed. Resets state regardless of cause so the next M.start() is
---- a clean spawn.
---- @param exitCode number Process exit code; 0 on clean kill, non-zero on crash.
---- @param _stdOut string Final stdout chunk (already streamed via onStdout).
---- @param stdErr string Final stderr chunk (logged on non-zero exit).
-local function onExit(exitCode, _stdOut, stdErr)
-  if exitCode ~= 0 and exitCode ~= 15 then -- 15 == SIGTERM, expected on M.stop
-    print(string.format("[vd-stream] whisper-stream exit=%s stderr=%q",
-      tostring(exitCode), tostring(stdErr)))
-  end
-  streamTask = nil
-  isStreaming = false
-end
-
--- ───── public API ───────────────────────────────────────────────────────────
-
---- Install a per-emission handler. The default is a no-op so step 4 ships a
---- runnable wiring layer; step 5's splice paste layer registers itself here.
---- @param fn function Called as fn(line: string) for every cleaned emission.
+--- Register the per-tick emission handler. Default is a no-op so the module
+--- ships callable on its own; voice-dictate-stream-mode wires the splice.
 function M.setEmissionHandler(fn)
   onEmission = fn or function(_line) end
 end
 
---- Spawn bin/stream.sh and start consuming its stdout. No-op if already
---- streaming. Idempotent in the sense that double-start has no extra effect;
---- the caller is expected to M.stop() first if they want a fresh process.
---- @param cfg table Optional config with .stream_sh; falls back to DEFAULT_STREAM_SH.
---- @return boolean True if a new task was started; false if already streaming.
+--- Boot the pipeline: server first (model load takes ~1s — must precede the
+--- first inference call), then ffmpeg, then the timer. Idempotent — second
+--- M.start() while running exits early.
+--- @param cfg table Optional config; .stream_sh and .server_sh override paths.
 function M.start(cfg)
   if isStreaming then return false end
   local streamSh = (cfg and cfg.stream_sh) or DEFAULT_STREAM_SH
-  streamTask = hs.task.new(streamSh, onExit, onStdout, {"stream"})
-  if not streamTask:start() then
-    print("[vd-stream] failed to start " .. streamSh)
-    streamTask = nil
-    return false
-  end
+  local serverSh = (cfg and cfg.server_sh) or DEFAULT_SERVER_SH
+  os.remove(SESSION_WAV)
+  lastDispatchedText = ""
+  pollInFlight = false
+  hs.task.new(serverSh, function(_exit, _stdout, _stderr) end, {"start"}):start()
+  ffmpegTask = hs.task.new(streamSh,
+    function(_exit, _stdout, _stderr) end,
+    {"record", SESSION_WAV})
+  ffmpegTask:start()
+  pollTimer = hs.timer.doEvery(POLL_INTERVAL_S, snapshotAndPost)
   isStreaming = true
   return true
 end
 
---- Kill the streaming task and reset state. Safe to call repeatedly. The
---- onExit callback fires on the task's actual exit and finishes state cleanup
---- there — this function only requests termination.
+--- Tear down the pipeline in reverse order: timer first, ffmpeg next, server
+--- last. The server stays up across sessions in principle, but tearing it
+--- down on M.stop keeps the lifecycle simple — start always pays the
+--- ~1s warm-up. Re-evaluate if that latency becomes a friction point.
 function M.stop()
-  if streamTask then
-    streamTask:terminate()
-    -- onExit clears streamTask + flips isStreaming when whisper-stream exits.
-  else
-    isStreaming = false
+  if pollTimer then pollTimer:stop(); pollTimer = nil end
+  if ffmpegTask then
+    local pid = ffmpegTask:pid()
+    if pid and pid > 0 then
+      hs.task.new("/bin/kill", nil, {"-TERM", tostring(pid)}):start()
+    end
+    ffmpegTask = nil
   end
+  hs.task.new(DEFAULT_SERVER_SH, nil, {"stop"}):start()
+  os.remove(SNAPSHOT_WAV)
+  isStreaming = false
 end
 
---- Read current state. Used by the menubar dropdown and by M.start() to guard
---- against double-spawn from chord overlap.
---- @return boolean True iff a streaming session is active.
+--- Query state.
+--- @return boolean True iff a streaming session is currently active.
 function M.isStreaming()
   return isStreaming
 end

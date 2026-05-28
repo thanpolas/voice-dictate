@@ -4,8 +4,8 @@
 # Subcommands:
 #   start [port]   Spawn whisper-server on loopback with the configured model
 #                  and language. Idempotent: re-runs while the daemon is alive
-#                  exit 0. Writes the PID to /tmp/voice-dictate-server.pid and
-#                  the stdout/stderr log to /tmp/voice-dictate-server.log.
+#                  exit 0. Writes the PID and log to the repo-local tmp/ dir
+#                  (project rule: never /tmp; see CLAUDE.md § Scratch paths).
 #   stop           Kill the daemon if a PID file exists. Safe to repeat.
 #   status         Echo "running PID" or "stopped"; exit 0 / 1 accordingly.
 #
@@ -45,9 +45,14 @@ readonly MODEL_PATH LANGUAGE THREADS
 : "${STREAM_SERVER_PORT:=8472}"
 readonly STREAM_SERVER_PORT
 
+# Repo-local scratch directory — all transient artefacts go here, never /tmp.
+readonly TMP_DIR="${SCRIPT_DIR}/../tmp"
+
 # Where the PID and log files live for the running daemon.
-readonly PID_FILE="/tmp/voice-dictate-server.pid"
-readonly LOG_FILE="/tmp/voice-dictate-server.log"
+readonly PID_FILE="${TMP_DIR}/stream-server.pid"
+readonly LOG_FILE="${TMP_DIR}/stream-server.log"
+
+mkdir -p "${TMP_DIR}"
 
 # Seconds to wait for the server to start accepting connections before
 # giving up; the model load happens during this window.

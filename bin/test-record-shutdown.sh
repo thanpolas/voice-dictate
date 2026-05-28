@@ -37,8 +37,11 @@ readonly AUDIO_DEVICE
 # Failure beyond this is the bug the suite is designed to catch.
 readonly MAX_SHUTDOWN_S=10
 
-# Where temporary WAVs land. Cleaned up at end of each test case.
-readonly TMP_PREFIX="/tmp/vd-test-shutdown-$$"
+# Where temporary WAVs land — repo-local tmp/, never /tmp (CLAUDE.md
+# § Scratch paths). Cleaned up at end of each test case.
+readonly TMP_DIR="${REPO_BIN}/../tmp"
+mkdir -p "${TMP_DIR}"
+readonly TMP_PREFIX="${TMP_DIR}/vd-test-shutdown-$$"
 
 # ───── helpers ──────────────────────────────────────────────────────────────
 

@@ -2,9 +2,10 @@
 # @fileoverview Background watchdog for ghost ffmpeg processes.
 #
 # Polls `pgrep` every INTERVAL seconds and appends a timestamped line to
-# /tmp/voice-dictate-ghost-watch.log every time the set of ffmpeg-recording
-# PIDs changes. Detects the bug where Hammerspoon's stopRecording fails to
-# kill ffmpeg, leaving a process recording forever.
+# the repo-local tmp/ghost-watch.log every time the set of ffmpeg-recording
+# PIDs changes (project rule: never /tmp; see CLAUDE.md § Scratch paths).
+# Detects the bug where Hammerspoon's stopRecording fails to kill ffmpeg,
+# leaving a process recording forever.
 #
 # Usage:
 #   ./bin/monitor-ghosts.sh start      # spawn in background, pid -> .pid file
@@ -20,11 +21,16 @@
 
 set -euo pipefail
 
+# Repo-local scratch directory — all transient artefacts go here, never /tmp.
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly TMP_DIR="${SCRIPT_DIR}/../tmp"
+mkdir -p "${TMP_DIR}"
+
 # Where the watchdog writes its observations.
-readonly LOG_FILE="/tmp/voice-dictate-ghost-watch.log"
+readonly LOG_FILE="${TMP_DIR}/ghost-watch.log"
 
 # Where the watchdog stores its own PID when running in background mode.
-readonly PID_FILE="/tmp/voice-dictate-ghost-watch.pid"
+readonly PID_FILE="${TMP_DIR}/ghost-watch.pid"
 
 # Seconds between polls. Sub-second resolution is overkill for this bug.
 readonly INTERVAL=0.5

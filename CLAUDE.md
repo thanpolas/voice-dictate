@@ -52,6 +52,12 @@ Full rules: [`engineering/conventions.md`][conventions-md] § Comments and docbl
 - **Reference-style links** in all docs (`[text][label]` + link block at the bottom). Switchboards are the only exception — they use the one-line `[Title](path)` inline form.
 - **No `---` horizontal rules.** Section dividers are `##` headers only — `---` rules break VS Code's markdown preview.
 
+## Scratch paths
+
+- **All transient artefacts go in the repo-local `tmp/` directory, never `/tmp`.** This applies to PID files, log files, in-progress WAVs, snapshots, test fixtures, fu-log — anything ephemeral. `tmp/` is gitignored and survives only as long as the repo checkout, which is exactly the right scope. System `/tmp` is shared with other tooling and routinely scavenged by the OS; debugging is harder when two unrelated runs collide and impossible after a reboot wipes the evidence.
+- **Shell scripts derive `tmp/` from `SCRIPT_DIR`** (e.g. `readonly TMP_DIR="${SCRIPT_DIR}/../tmp"`) and `mkdir -p` on entry — never hardcode an absolute path. Lua modules derive it from the script-path config (`cfg.stream_sh` etc.) by stripping `/bin/<file>`.
+- **Exception:** none in this repo. If you find yourself reaching for `/tmp`, you are wrong.
+
 ## Naming
 
 - Intention-revealing: `transcribeAndPaste`, `MODEL_PATH`. Not `process`, not `m`.

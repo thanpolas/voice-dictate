@@ -96,4 +96,6 @@ Regression test against the `(B[m` ANSI prefix that leaked into pasted transcrip
 
 ## [monitor-ghosts.sh](monitor-ghosts.sh)
 
-Background watchdog that polls `pgrep` every 0.5s for `ffmpeg.*voice-dictate` and logs START/WAV/GONE transitions to `/tmp/voice-dictate-ghost-watch.log`. Designed to catch orphan ffmpegs in the wild during long dictation sessions — complementary to `test-record-shutdown.sh`'s automated coverage. Subcommands: `start | stop | status | tail | reset`.
+Background watchdog that polls `pgrep` every 0.5s for `ffmpeg.*voice-dictate` and logs START/WAV/GONE transitions to `tmp/ghost-watch.log` (repo-local tmp/, never `/tmp` — see [CLAUDE.md][claude-md] § Scratch paths). Designed to catch orphan ffmpegs in the wild during long dictation sessions — complementary to `test-record-shutdown.sh`'s automated coverage. Subcommands: `start | stop | status | tail | reset`.
+
+[claude-md]: ../CLAUDE.md
