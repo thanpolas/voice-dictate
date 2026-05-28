@@ -1,0 +1,195 @@
+--- @fileoverview Clipboard-mediated splice — paste each whisper-stream emission
+--- into the focused field via Shift+Cmd+Up / Cmd+X / modify clipboard / Cmd+V.
+--- Sibling of voice-dictate-stream.lua: stream.lua consumes the stdout; this
+--- module turns emissions into paste cycles while preserving the user's
+--- clipboard across the session and stopping on focus loss.
+---
+--- Public API: M.startSession(cfg), M.applyEmission(line), M.stopSession(),
+--- M.setOnStop(fn), M.isActive().
+
+local M = {}
+
+-- ───── constants ────────────────────────────────────────────────────────────
+
+--- Milliseconds to wait after Cmd+X before reading the pasteboard. NSPasteboard
+--- writes asynchronously to its delegate; 80ms is generous on Apple Silicon
+--- without making the cycle feel sluggish at the 500ms step default.
+local CUT_SETTLE_MS = 80
+
+--- Milliseconds to wait after Cmd+V before the next splice cycle can fire.
+--- Prevents the next emission from racing into the field before the paste
+--- has actually landed.
+local PASTE_SETTLE_MS = 40
+
+-- ───── module state ─────────────────────────────────────────────────────────
+
+--- True between startSession() and stopSession(); read by stream.lua.
+local isActive = false
+
+--- Words that have fallen off the whisper-stream window — D2 commit/tail.
+--- Empty until the calibration-driven promotion algorithm wires up.
+local committedPrefix = ""
+
+--- Full dictation text last pasted into the field; the splice's anchor
+--- substring for D3 (divergence skip on user-edited text).
+local lastPastedDictationText = ""
+
+--- Clipboard contents at startSession() — restored on stopSession (D4).
+local pasteboardSnapshot = nil
+
+--- hs.window.filter handle subscribed for focus-change events.
+local focusFilter = nil
+
+--- True for Spike 1 fallback: emissions are append-only, no splice replace.
+local appendOnly = false
+
+--- Caller hook fired when focus-loss policy (D6) self-stops the session.
+local onStop = function() end
+
+-- ───── helpers ──────────────────────────────────────────────────────────────
+
+--- Pause for `ms` milliseconds. hs.timer.usleep takes microseconds; this is
+--- the readable wrapper used by the keystroke chain.
+--- @param ms number Milliseconds to sleep.
+local function sleepMs(ms)
+  hs.timer.usleep(ms * 1000)
+end
+
+--- Synthesize the select-to-start-of-document keystroke for native macOS
+--- text views. On single-line fields it collapses to select-to-start-of-line,
+--- which still covers anything the splice could have pasted there.
+local function selectToStart()
+  hs.eventtap.keyStroke({"shift", "cmd"}, "up", 0)
+end
+
+--- Cut the current selection to the system pasteboard. On empty selection
+--- this is a no-op and preserves the clipboard — we rely on the caller to
+--- have just synthesized selectToStart() so a selection exists.
+local function cutSelection()
+  hs.eventtap.keyStroke({"cmd"}, "x", 0)
+  sleepMs(CUT_SETTLE_MS)
+end
+
+--- Paste current clipboard contents. Trailing sleep prevents the next splice
+--- cycle from racing in before the field actually shows the new text.
+local function pasteClipboard()
+  hs.eventtap.keyStroke({"cmd"}, "v", 0)
+  sleepMs(PASTE_SETTLE_MS)
+end
+
+-- ───── splice / append paths ────────────────────────────────────────────────
+
+--- Run one full splice cycle against the focused field. Returns true on a
+--- successful replace; false if D3's divergence skip fired (user edited the
+--- text mid-stream and our anchor substring is gone). On false, the cut
+--- contents are written back and pasted so the user's edit is preserved.
+--- @param emission string Cleaned whisper-stream emission for this cycle.
+--- @return boolean True if the splice landed; false on divergence skip.
+local function spliceCycle(emission)
+  local newFullText = committedPrefix .. emission
+  selectToStart()
+  cutSelection()
+  local cut = hs.pasteboard.getContents() or ""
+  if lastPastedDictationText ~= "" and not cut:find(lastPastedDictationText, 1, true) then
+    hs.pasteboard.setContents(cut)
+    pasteClipboard()
+    return false
+  end
+  local swapped
+  if lastPastedDictationText == "" then
+    swapped = cut .. newFullText
+  else
+    swapped = (cut:gsub(lastPastedDictationText, newFullText, 1))
+  end
+  hs.pasteboard.setContents(swapped)
+  pasteClipboard()
+  lastPastedDictationText = newFullText
+  return true
+end
+
+--- Append-only emission: type the new content at the cursor without
+--- selecting / cutting / replacing. Used when STREAM_APPEND_ONLY is true
+--- (Spike 1 fallback) and the splice would be a no-op anyway.
+--- @param emission string Cleaned whisper-stream emission for this cycle.
+local function appendCycle(emission)
+  hs.pasteboard.setContents(emission)
+  pasteClipboard()
+  lastPastedDictationText = lastPastedDictationText .. emission
+end
+
+-- ───── focus-loss policy (D6) ───────────────────────────────────────────────
+
+--- Stop the session in response to a focus change. Wires straight into the
+--- module-level stopSession + the caller-supplied onStop hook so the
+--- streaming task also dies. No-op if the session has already ended.
+local function onFocusChanged()
+  if not isActive then return end
+  M.stopSession()
+  onStop()
+end
+
+--- Subscribe to focus-changed events for the duration of the session.
+--- Stored on focusFilter so unsubscribe can run from stopSession().
+local function subscribeFocus()
+  focusFilter = hs.window.filter.new()
+  focusFilter:subscribe(hs.window.filter.windowFocused, onFocusChanged)
+end
+
+--- Unsubscribe focus events; release the filter handle so no callbacks
+--- survive past the session.
+local function unsubscribeFocus()
+  if focusFilter then
+    focusFilter:unsubscribeAll()
+    focusFilter = nil
+  end
+end
+
+-- ───── public API ───────────────────────────────────────────────────────────
+
+--- Start a splice session. Snapshots the clipboard, resets state, subscribes
+--- focus events. Idempotent — calling start while active is a no-op.
+--- @param cfg table Optional config with .append_only.
+function M.startSession(cfg)
+  if isActive then return end
+  pasteboardSnapshot = hs.pasteboard.getContents()
+  committedPrefix = ""
+  lastPastedDictationText = ""
+  appendOnly = cfg and cfg.append_only or false
+  subscribeFocus()
+  isActive = true
+end
+
+--- Dispatch one emission line through the configured cycle.
+--- @param line string Cleaned whisper-stream emission.
+function M.applyEmission(line)
+  if not isActive or not line or line == "" then return end
+  if appendOnly then appendCycle(line) else spliceCycle(line) end
+end
+
+--- Stop the session. Restores the pre-session clipboard snapshot,
+--- unsubscribes focus, resets state. Safe to call repeatedly.
+function M.stopSession()
+  if not isActive then return end
+  unsubscribeFocus()
+  if pasteboardSnapshot ~= nil then
+    hs.pasteboard.setContents(pasteboardSnapshot)
+  end
+  pasteboardSnapshot = nil
+  committedPrefix = ""
+  lastPastedDictationText = ""
+  isActive = false
+end
+
+--- Register the caller hook fired on focus-loss self-stop.
+--- @param fn function Called with no arguments after stopSession() runs.
+function M.setOnStop(fn)
+  onStop = fn or function() end
+end
+
+--- Query session state. Used by the orchestrator and the menubar dropdown.
+--- @return boolean True iff a splice session is currently active.
+function M.isActive()
+  return isActive
+end
+
+return M
