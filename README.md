@@ -6,10 +6,14 @@
 
 Press a hotkey, speak, release/tap — transcript pastes into the focused text field. No cloud, no monthly fee, no audio leaves the machine.
 
-Two hotkeys:
+Two single-shot hotkeys (accuracy-first; record then transcribe then paste):
 
 - **Right Option (held)** — push-to-talk
 - **Cmd+Shift+D (tap)** — toggle start/stop
+
+Plus an opt-in streaming hotkey (liveness-first; text appears while you speak):
+
+- **Cmd+Shift+S (tap)** — start/stop streaming dictation. Plain-text fields only; trades accuracy for live-typing feel. See the [streaming-transcription plan][stream-plan] for the contract.
 
 # Prerequisites
 
@@ -120,6 +124,7 @@ Copyright © [Thanos Polychronakis][thanpolas] and Authors, [Licensed under ISC]
 [lua-mod]: hammerspoon/voice-dictate.lua
 [spec-md]: engineering/plans/2026-05-20-v0.1-spec.md
 [spec-transcription]: engineering/plans/2026-05-20-v0.1-spec.md#transcription
+[stream-plan]: engineering/plans/2026-05-26-streaming-transcription.md
 [cde-md]: engineering/cde.md
 [claude-md]: CLAUDE.md
 [inventory-md]: INVENTORY.md
