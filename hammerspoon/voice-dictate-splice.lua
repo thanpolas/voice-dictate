@@ -118,14 +118,25 @@ local function spliceCycle(emission)
   return true
 end
 
---- Append-only emission: type the new content at the cursor without
---- selecting / cutting / replacing. Used when STREAM_APPEND_ONLY is true
---- (Spike 1 fallback) and the splice would be a no-op anyway.
+--- Append-only emission: paste the new content at the cursor without
+--- selecting / cutting / replacing. The Spike 1 fallback (now the default)
+--- because whisper-stream's step-mode emissions over a short rolling window
+--- are not stable revisions — successive emissions are disjoint transcripts
+--- of overlapping audio, so replacing each with the next would lose every-
+--- thing except the final 5s. Append preserves all real speech the model
+--- emits at the cost of some duplication around window boundaries.
+--- Inserts a single space when the previous paste did not end with whitespace
+--- and the new emission does not start with one — so accumulated text stays
+--- word-segmented.
 --- @param emission string Cleaned whisper-stream emission for this cycle.
 local function appendCycle(emission)
-  hs.pasteboard.setContents(emission)
+  local needsSpace = lastPastedDictationText ~= ""
+    and not lastPastedDictationText:match("%s$")
+    and not emission:match("^%s")
+  local pasteText = needsSpace and (" " .. emission) or emission
+  hs.pasteboard.setContents(pasteText)
   pasteClipboard()
-  lastPastedDictationText = lastPastedDictationText .. emission
+  lastPastedDictationText = lastPastedDictationText .. pasteText
 end
 
 -- ───── focus-loss policy (D6) ───────────────────────────────────────────────
@@ -165,7 +176,15 @@ function M.startSession(cfg)
   pasteboardSnapshot = hs.pasteboard.getContents()
   committedPrefix = ""
   lastPastedDictationText = ""
-  appendOnly = cfg and cfg.append_only or false
+  -- Default to append-only when the config does not explicitly set it.
+  -- Splice (false) only makes sense if whisper-stream gives stable revisions
+  -- across emissions; in practice it does not at our window/model size, so
+  -- append is the safe default.
+  if cfg ~= nil and cfg.append_only ~= nil then
+    appendOnly = cfg.append_only
+  else
+    appendOnly = true
+  end
   subscribeFocus()
   isActive = true
 end

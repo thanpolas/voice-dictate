@@ -55,7 +55,7 @@ return {
   flush_delay_s = 0.2,
   hide_hammerspoon_icon = true,
   stream_sh = "${stream_sh}",
-  stream_append_only = false,
+  stream_append_only = true,
 }
 EOF
   log ok "wrote ${destination}"
