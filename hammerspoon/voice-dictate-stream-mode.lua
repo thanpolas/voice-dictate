@@ -29,10 +29,16 @@ end
 
 --- Begin a streaming session. Splice goes first so the first emission lands
 --- in a session that has clipboard snapshot + focus subscription ready.
---- @param cfg table Optional config — passes .stream_sh to stream, .stream_append_only to splice.
+--- Splice mode is always in-place replace (not append-only): the new
+--- pipeline emits the full current transcript on each tick, so each new
+--- emission is a revision of the previous one and the splice's
+--- substring-replace mechanic preserves prefix + revises tail correctly.
+--- The legacy cfg.stream_append_only knob is no longer honoured — left in
+--- old config files it's ignored.
+--- @param cfg table Optional config; .stream_sh and .server_sh route to stream.
 function M.startSession(cfg)
   if stream.isStreaming() then return end
-  splice.startSession({append_only = cfg and cfg.stream_append_only})
+  splice.startSession({append_only = false})
   stream.setEmissionHandler(splice.applyEmission)
   stream.start(cfg)
 end
