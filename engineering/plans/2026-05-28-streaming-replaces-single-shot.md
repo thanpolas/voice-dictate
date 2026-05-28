@@ -84,6 +84,45 @@ Post-turbo session: emissions arrive every ~2s (was 3-5s with large-v3 — confi
 
 **Lever 1 (taken):** bump `STREAM_LENGTH_MS` default from 5000 to 10000 in [`bin/stream.sh`][stream-sh]. Turbo's per-emission inference at 10s is roughly the same wallclock as large-v3 at 5s was, so live-feel doesn't degrade. `bin/README.md`'s config table updated to match.
 
+### 2026-05-28 ~21:55 — Wrong mic: SDL2 default was BlackHole 2ch
+
+With turbo + 10s the quality was still mostly hallucinations ("Ωραία! Ωραία! Ωραία!" repeating; "Αυτή. αυτή η θέα θα σώσω πιο" loops; the recurring "Υπότιτλοι AUTHORWAVE" subtitle artifact). That artifact is the smoking gun — whisper emits it when it hears silence or unrelated noise and falls back to common training patterns.
+
+Running `./bin/stream.sh stream` from a terminal exposed why. SDL2's device enumeration on this Mac:
+
+```
+init: found 4 capture devices:
+init:    - Capture device #0: 'External Audio Device'
+init:    - Capture device #1: 'iPhone Microphone'
+init:    - Capture device #2: 'BlackHole 2ch'
+init:    - Capture device #3: 'iMac Microphone'
+init: attempt to open default capture device ...
+init: obtained spec for input device (SDL Id = 2):
+```
+
+`-1` (whisper-stream's "use SDL2 default") resolved to **device #2: BlackHole 2ch** — a virtual loopback that captures desktop audio, not the mic. Every previous session, whisper was transcribing system silence and whatever audio was playing on the Mac. avfoundation's default (used by ffmpeg for the single-shot path) was always the right mic; SDL2 enumerates independently and picked the loopback.
+
+**Decision:** set `STREAM_CAPTURE_ID=1` in `bin/config.local.sh` to pin whisper-stream to the actual mic. The config file is gitignored and user-specific, which is the right home — SDL2 device ordering is per-machine. Long-term follow-up: `install.sh` should list SDL2 devices and prompt for the capture ID, the same way it does for ffmpeg's `AUDIO_DEVICE` via the menubar picker; out of scope for this session.
+
+## Test fixture for repeatable comparisons
+
+For meaningful before/after testing across config changes, read the same Greek text aloud each time. Same words, same pace, same mic position — that way an emission table actually shows whether the change helped.
+
+```
+Δοκιμή υπαγόρευσης φωνής. Το voice-dictate τρέχει streaming μέσω whisper-stream
+και η εμφάνιση του κειμένου γίνεται ζωντανά στο πεδίο. Στόχος είναι μια
+καθαρή μεταγραφή χωρίς ψευδαισθήσεις. Πρώτη πρόταση, δεύτερη πρόταση,
+τρίτη πρόταση. Τέλος δοκιμής.
+```
+
+Rough translation, for diff-checking against emissions: "Voice dictation test. voice-dictate runs streaming through whisper-stream and the text appears live in the field. The goal is a clean transcription without hallucinations. First sentence, second sentence, third sentence. End of test."
+
+Properties that make this a useful fixture:
+- Mixes Greek with English technical terms (`voice-dictate`, `streaming`, `whisper-stream`) — matches the real workload of dictating prompts into Claude Code etc.
+- Has clear sentence boundaries — surfaces how the splice / append cycles handle punctuation.
+- "Πρώτη / δεύτερη / τρίτη πρόταση" is an explicit token sequence that's easy to spot in the emission log; if those land correctly, ordering + window-overlap dedup is working.
+- ~15 seconds at normal speaking pace — long enough to produce 4-6 emissions at 10s window / ~2s emission interval, short enough to repeat without fatigue.
+
 [stream-plan]: 2026-05-26-streaming-transcription.md
 [spike-log]: 2026-05-26-streaming-spike-log.md
 [dictate-sh]: ../../bin/dictate.sh
