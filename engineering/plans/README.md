@@ -13,6 +13,7 @@ Naming: `YYYY-MM-DD-slug.md`. The date is the day the plan was opened, not when 
 - [2026-05-26-cursor-loader.md](2026-05-26-cursor-loader.md) — On-pointer visual feedback during transcription: a decorative spinner overlay tracking the mouse cursor.
 - [2026-05-26-streaming-transcription.md](2026-05-26-streaming-transcription.md) — Transcribe audio in segments while recording continues, cutting on silence at pauses.
 - [2026-05-26-streaming-spike-log.md](2026-05-26-streaming-spike-log.md) — Findings from the two calibration spikes the streaming-transcription plan calls for; informs production defaults and fallbacks.
+- [2026-05-28-streaming-replaces-single-shot.md](2026-05-28-streaming-replaces-single-shot.md) — Supersedes D5: streaming now drives the existing Right Option + Cmd+Shift+D hotkeys; single-shot stays shell-only.
 - [2026-05-25-install-ux-bootstrap.md](2026-05-25-install-ux-bootstrap.md) — Install UX rethink: delete INSTALL.md, make install.sh a true bootstrapper, decide distribution path.
 - [2026-05-20-v0.1-spec.md](2026-05-20-v0.1-spec.md) — Locked v0.1 spec: scope, architecture, configuration surface, dependencies, open questions.
 - [2026-05-20-v0.1-implementation.md](2026-05-20-v0.1-implementation.md) — Original v0.1 implementation order: dictate.sh → Lua module → install.sh → READMEs → e2e.
