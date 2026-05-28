@@ -74,7 +74,7 @@ Streaming runs whisper over a sliding 5s window. Single-pass `whisper-cli` on a 
 | `LANGUAGE` | from `config.local.sh` | Shared with [dictate.sh](dictate.sh). |
 | `THREADS` | from `config.local.sh` | Shared with [dictate.sh](dictate.sh). |
 | `STREAM_STEP_MS` | `500` | How often whisper-stream emits the current transcript of the rolling window. Raise to 1000–1500 if splice flicker or inference latency is excessive. |
-| `STREAM_LENGTH_MS` | `5000` | Length of the rolling audio window. Raise toward 8000 if 5s drops the start of long thoughts. |
+| `STREAM_LENGTH_MS` | `10000` | Length of the rolling audio window. 5s starved large-v3 of context and produced subtitle-style hallucinations in Greek; 10s anchors meaningfully. Lower toward 5000 if per-emission inference falls behind on slower hardware. |
 | `STREAM_KEEP_MS` | `200` | Carry-over from the prior window for boundary continuity. Rarely needs tuning. |
 | `STREAM_CAPTURE_ID` | `-1` (SDL2 default) | SDL2 capture device ID. **Not** the same as ffmpeg's `MIC_INDEX`; list devices by running `stream.sh` once and watching the SDL2 stderr output. |
 

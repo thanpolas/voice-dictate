@@ -54,9 +54,11 @@ readonly MODEL_PATH LANGUAGE THREADS
 readonly STREAM_STEP_MS
 
 # Length of the rolling audio window in ms — how much recent audio the model
-# reconsiders on each emission. 5s gives whisper meaningful context while
-# keeping per-emission inference under a step interval on Apple Silicon.
-: "${STREAM_LENGTH_MS:=5000}"
+# reconsiders on each emission. 10s gives whisper enough context to anchor on
+# (5s starved large-v3 of context and produced subtitle-style hallucinations
+# in Greek); turbo keeps per-emission inference fast enough at this size to
+# still feel live on M-series.
+: "${STREAM_LENGTH_MS:=10000}"
 readonly STREAM_LENGTH_MS
 
 # Audio carried from the previous step in ms — boundary continuity so the

@@ -78,6 +78,12 @@ With append-only on, every real emission lands in the field — confirmed via Co
 
 **Lever 2 (taken):** switch the model from `ggml-large-v3.bin` (3.0 GB, slow) to `ggml-large-v3-turbo-q5_0.bin` (547 MB, 2-3× faster on M1, comparable quality). The turbo file was already on disk at `~/whisper-models/`. Edited `bin/config.local.sh`'s `MODEL_PATH` to point at it. `hs.reload()` picks it up since dictate.sh sources the local config on every spawn.
 
+### 2026-05-28 ~21:47 — Turbo cuts latency; quality still bad at 5s
+
+Post-turbo session: emissions arrive every ~2s (was 3-5s with large-v3 — confirms ~2× speedup). Field still mostly hallucinations though: "Υπότιτλοι AUTHORWAVE" appeared as the very first emission, then four near-identical riffs on "Για να δούμε τα πώς…" ("Let's see how…") — whisper anchoring on a comfortable Greek phrase pattern rather than the actual audio. 5s window remains too thin.
+
+**Lever 1 (taken):** bump `STREAM_LENGTH_MS` default from 5000 to 10000 in [`bin/stream.sh`][stream-sh]. Turbo's per-emission inference at 10s is roughly the same wallclock as large-v3 at 5s was, so live-feel doesn't degrade. `bin/README.md`'s config table updated to match.
+
 [stream-plan]: 2026-05-26-streaming-transcription.md
 [spike-log]: 2026-05-26-streaming-spike-log.md
 [dictate-sh]: ../../bin/dictate.sh
