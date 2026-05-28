@@ -83,24 +83,31 @@ end
 --- successful replace; false if D3's divergence skip fired (user edited the
 --- text mid-stream and our anchor substring is gone). On false, the cut
 --- contents are written back and pasted so the user's edit is preserved.
+---
+--- On the *first* emission of a session, lastPastedDictationText is empty
+--- and there is nothing of ours in the field to splice over. We skip the
+--- Shift+Cmd+Up + Cmd+X dance entirely and just paste at the cursor.
+--- Avoids triggering apps that interpret Shift+Cmd+Up on an empty prompt
+--- as "load previous history" (Claude Code's input, most REPLs).
 --- @param emission string Cleaned whisper-stream emission for this cycle.
 --- @return boolean True if the splice landed; false on divergence skip.
 local function spliceCycle(emission)
   local newFullText = committedPrefix .. emission
+  if lastPastedDictationText == "" then
+    hs.pasteboard.setContents(newFullText)
+    pasteClipboard()
+    lastPastedDictationText = newFullText
+    return true
+  end
   selectToStart()
   cutSelection()
   local cut = hs.pasteboard.getContents() or ""
-  if lastPastedDictationText ~= "" and not cut:find(lastPastedDictationText, 1, true) then
+  if not cut:find(lastPastedDictationText, 1, true) then
     hs.pasteboard.setContents(cut)
     pasteClipboard()
     return false
   end
-  local swapped
-  if lastPastedDictationText == "" then
-    swapped = cut .. newFullText
-  else
-    swapped = (cut:gsub(lastPastedDictationText, newFullText, 1))
-  end
+  local swapped = (cut:gsub(lastPastedDictationText, newFullText, 1))
   hs.pasteboard.setContents(swapped)
   pasteClipboard()
   lastPastedDictationText = newFullText
