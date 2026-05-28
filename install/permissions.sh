@@ -22,17 +22,13 @@ readonly VD_SECURITY_PANE_URL="x-apple.systempreferences:com.apple.preference.se
 function walk_permissions() {
   log info "Hammerspoon needs three macOS permissions to run unattended."
   echo "" >&2
-  echo "For each pane that opens:" >&2
-  echo "  1. If Hammerspoon is in the list, toggle it ON." >&2
-  echo "  2. If NOT, click the [+] below the list, choose" >&2
-  echo "     /Applications/Hammerspoon.app, then toggle it ON." >&2
-  echo "  3. If macOS asks to quit and relaunch Hammerspoon, say yes." >&2
+  echo "Each pane opens in System Settings. Hammerspoon will be in the list" >&2
+  echo "(the install just registered it with TCC) — toggle it ON, then press" >&2
+  echo "Enter here. macOS may ask to quit and relaunch Hammerspoon — say yes." >&2
   echo "" >&2
-  echo "Microphone is special: Hammerspoon won't appear in that pane until" >&2
-  echo "the first dictation actually fires ffmpeg. Press 's' to skip it now;" >&2
+  echo "Microphone is the exception: Hammerspoon won't appear there until the" >&2
+  echo "first dictation actually fires ffmpeg. Press 's' to skip it now;" >&2
   echo "macOS will prompt on first recording and add the row automatically." >&2
-  echo "" >&2
-  echo "Press Enter to confirm each pane, or 's' to skip." >&2
   echo "" >&2
   _prompt_for_pane "Accessibility" "Privacy_Accessibility" \
     "Required for the simulated Cmd+V paste (hs.eventtap.keyStroke)."
@@ -54,7 +50,7 @@ function _prompt_for_pane() {
   log info "${title} — ${why}"
   open "${VD_SECURITY_PANE_URL}?${anchor}" || true
   local answer
-  read -r -p "Press Enter when Hammerspoon is added + enabled under ${title} (or 's' to skip): " answer
+  read -r -p "Press Enter when Hammerspoon is enabled under ${title} (or 's' to skip): " answer
   if [[ "${answer}" == "s" || "${answer}" == "S" ]]; then
     log warn "skipped ${title}; voice-dictate may fail on first use."
   else
