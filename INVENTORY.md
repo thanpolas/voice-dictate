@@ -57,7 +57,6 @@ Bootstrapper helpers sourced by the top-level `install.sh`. Stubs today; behavio
 - [install/lib.sh](install/lib.sh) — Shared interactive prompt, logging, and command-presence helpers used by every other install helper.
 - [install/deps.sh](install/deps.sh) — Homebrew detection and bootstrap; per-dependency install prompts; brew install dispatch.
 - [install/model.sh](install/model.sh) — Whisper model discovery across known locations and resumable download to project-local storage.
-- [install/permissions.sh](install/permissions.sh) — macOS System Settings walkthrough for Accessibility, Input Monitoring, and Microphone panes.
 - [install/hammerspoon.sh](install/hammerspoon.sh) — Symlink the Lua modules, patch the user's init script, and trigger a Hammerspoon reload.
 - [install/config.sh](install/config.sh) — Generate the shell-side and Lua-side runtime configuration files from prompted values.
 - [install/migration.sh](install/migration.sh) — Version-to-version migration entry point invoked by the orchestrator's update flow.

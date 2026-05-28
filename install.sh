@@ -49,8 +49,6 @@ source "${REPO_ROOT}/install/model.sh"
 source "${REPO_ROOT}/install/config.sh"
 # shellcheck source=install/hammerspoon.sh
 source "${REPO_ROOT}/install/hammerspoon.sh"
-# shellcheck source=install/permissions.sh
-source "${REPO_ROOT}/install/permissions.sh"
 
 # Read MODEL_PATH and LANGUAGE from an existing config.local.sh, if any.
 # Echoes "model|language" so the orchestrator can split it; empty fields when
@@ -116,10 +114,8 @@ function cmd_install() {
   reload_hammerspoon
 
   echo
-  walk_permissions
-
-  echo
-  log ok "voice-dictate installed. Hotkeys: Right Option (PTT), Cmd+Shift+D (toggle)."
+  log ok "voice-dictate installed. Hotkeys: Right Option (PTT), Cmd+Shift+D (toggle), Cmd+Shift+S (streaming)."
+  log info "macOS will prompt for Accessibility, Input Monitoring, and Microphone on first use — grant each when asked."
 }
 
 # Placeholder for the tagged-release update flow; real logic lands in the

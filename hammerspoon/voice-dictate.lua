@@ -37,11 +37,6 @@ local RIGHT_ALT_KEYCODE = cfg.right_alt_keycode
 --- ffmpeg time to flush the trailer cleanly on SIGTERM.
 local FLUSH_DELAY_S = cfg.flush_delay_s
 
---- Sentinel path written by M.start() once hotkeys and the eventtap are
---- bound. install.sh polls this file before opening the System Settings
---- panes so Hammerspoon is in the TCC list by the time the user looks.
-local READY_SENTINEL = "/tmp/voice-dictate-ready"
-
 --- Hide Hammerspoon's own menubar icon so the Dikta item is the one control
 --- surface. Defaults true when the config key is absent; set
 --- hide_hammerspoon_icon = false in the config to keep Hammerspoon's icon.
@@ -276,8 +271,6 @@ function M.start()
   })
   bindHotkeys()
   streamMode.start(cfg)
-  local sentinel = io.open(READY_SENTINEL, "w")
-  if sentinel then sentinel:write(tostring(os.time())); sentinel:close() end
   print("voice-dictate: ready (PTT = Right Option, Toggle = " ..
     table.concat(TOGGLE_MODS, "+") .. "+" .. TOGGLE_KEY ..
     ", Stream = " .. table.concat(cfg.stream_toggle_mods or {"cmd","shift"}, "+") ..

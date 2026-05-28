@@ -47,40 +47,14 @@ function patch_init_lua() {
   log ok "patched ${init_lua}"
 }
 
-# Filesystem sentinel written by voice-dictate.lua's M.start() after the
-# hotkeys + eventtap are bound. Polled below so the permissions walkthrough
-# only opens once macOS has actually registered Hammerspoon's TCC access.
-readonly VD_READY_SENTINEL="/tmp/voice-dictate-ready"
-
-# Maximum seconds to wait for the sentinel before falling back; the load is
-# typically ~1s on first run, longer on cold start when the app must boot.
-readonly VD_READY_TIMEOUT_S=15
-
-# Launch Hammerspoon if it isn't already running, trigger a config reload,
-# and block until voice-dictate.lua has finished M.start() — i.e. the
-# eventtap and hotkeys are live and macOS has logged them with TCC. Without
-# this wait the Input Monitoring pane opens before Hammerspoon attempts the
-# event tap, leaving the app missing from the list.
+# Launch Hammerspoon if it isn't already running and trigger a config reload.
+# Fire-and-forget — macOS handles the permission prompts at the point of
+# access (eventtap bind, simulated paste, ffmpeg spawn). No walkthrough.
 function reload_hammerspoon() {
-  rm -f "${VD_READY_SENTINEL}"
   if ! pgrep -x Hammerspoon >/dev/null; then
     log info "launching Hammerspoon"
     open -ga Hammerspoon
   fi
   open -g "hammerspoon://reload"
-  log info "requested Hammerspoon reload; waiting for it to come up"
-  local waited=0
-  while [[ ! -f "${VD_READY_SENTINEL}" && "${waited}" -lt "${VD_READY_TIMEOUT_S}" ]]; do
-    sleep 1
-    waited=$((waited + 1))
-  done
-  if [[ ! -f "${VD_READY_SENTINEL}" ]]; then
-    log warn "Hammerspoon did not signal ready within ${VD_READY_TIMEOUT_S}s"
-    log warn "check the Hammerspoon Console for load errors before proceeding"
-    return 0
-  fi
-  # Brief extra settle so the eventtap registration shows up in the
-  # Input Monitoring list when System Settings queries TCC next.
-  sleep 1
-  log ok "Hammerspoon ready"
+  log info "requested Hammerspoon reload"
 }
