@@ -6,6 +6,10 @@
 #   transcribe <wav-path>  Run whisper-cli; print plain transcript to stdout.
 #   smoke                  Transcribe bundled JFK fixture; assert non-empty output.
 #
+# Owns the single-shot record-then-transcribe pipeline. The opt-in streaming
+# pipeline lives in the sibling bin/stream.sh — different process model,
+# different lifecycle, different paste mechanic. Neither modifies the other.
+#
 # Runtime config (MODEL_PATH, LANGUAGE, THREADS, AUDIO_DEVICE) is sourced from
 # the sibling bin/config.local.sh file written by install.sh. Per-invocation
 # environment overrides still work (e.g. LANGUAGE=en ./bin/dictate.sh smoke).
