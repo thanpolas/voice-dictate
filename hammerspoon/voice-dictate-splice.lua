@@ -30,6 +30,11 @@ local PASTE_SETTLE_MS = 40
 --- transcript. 400ms is comfortable for every app we've tested.
 local PASTEBOARD_RESTORE_DELAY_S = 0.4
 
+--- Console log prefix for this module's diagnostics, mirroring the sibling
+--- [vd-stream] prefix. The splice layer previously emitted nothing, so a
+--- failed paste cycle was invisible in the Hammerspoon Console.
+local LOG_PREFIX = "[vd-splice]"
+
 -- ───── module state ─────────────────────────────────────────────────────────
 
 --- True between startSession() and stopSession(); read by stream.lua.
@@ -111,6 +116,7 @@ local function spliceCycle(emission)
     hs.pasteboard.setContents(newFullText)
     pasteClipboard()
     lastPastedDictationText = newFullText
+    print(string.format("%s first paste (%d chars)", LOG_PREFIX, #newFullText))
     return true
   end
   selectToStart()
@@ -120,6 +126,9 @@ local function spliceCycle(emission)
   if not startIdx then
     hs.pasteboard.setContents(cut)
     pasteClipboard()
+    print(string.format(
+      "%s D3 skip: anchor not found in cut (cut=%d chars, starts %q)",
+      LOG_PREFIX, #cut, cut:sub(1, 40)))
     return false
   end
   -- Concat-based splice rather than gsub so pattern magic in the anchor
@@ -128,6 +137,8 @@ local function spliceCycle(emission)
   local swapped = cut:sub(1, startIdx - 1) .. newFullText .. cut:sub(endIdx + 1)
   hs.pasteboard.setContents(swapped)
   pasteClipboard()
+  print(string.format(
+    "%s landed: replaced anchor@%d (new=%d chars)", LOG_PREFIX, startIdx, #newFullText))
   lastPastedDictationText = newFullText
   return true
 end
