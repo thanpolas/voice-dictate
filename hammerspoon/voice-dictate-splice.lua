@@ -22,6 +22,14 @@ local CUT_SETTLE_MS = 80
 --- has actually landed.
 local PASTE_SETTLE_MS = 40
 
+--- Seconds to wait after stopSession() before restoring the pre-session
+--- clipboard. The most recent spliceCycle synthesized a Cmd+V that needs
+--- time to land in the target app; restoring too quickly races with the
+--- paste handler in slower apps (Slack, browser textareas) and the user
+--- sees the pre-session clipboard contents pasted in place of the
+--- transcript. 400ms is comfortable for every app we've tested.
+local PASTEBOARD_RESTORE_DELAY_S = 0.4
+
 -- ───── module state ─────────────────────────────────────────────────────────
 
 --- True between startSession() and stopSession(); read by stream.lua.
@@ -203,18 +211,25 @@ function M.applyEmission(line)
   if appendOnly then appendCycle(line) else spliceCycle(line) end
 end
 
---- Stop the session. Restores the pre-session clipboard snapshot,
---- unsubscribes focus, resets state. Safe to call repeatedly.
+--- Stop the session. Tears down focus + state immediately so any further
+--- applyEmission calls no-op, then defers the pre-session clipboard
+--- restore by PASTEBOARD_RESTORE_DELAY_S so the most recent spliceCycle's
+--- synthetic Cmd+V has time to land in the target app. Restoring inline
+--- races with slow paste handlers and causes the pre-session clipboard
+--- to land in the field instead of the transcript. Safe to call repeatedly.
 function M.stopSession()
   if not isActive then return end
   unsubscribeFocus()
-  if pasteboardSnapshot ~= nil then
-    hs.pasteboard.setContents(pasteboardSnapshot)
-  end
-  pasteboardSnapshot = nil
+  isActive = false
   committedPrefix = ""
   lastPastedDictationText = ""
-  isActive = false
+  local snapshot = pasteboardSnapshot
+  pasteboardSnapshot = nil
+  if snapshot ~= nil then
+    hs.timer.doAfter(PASTEBOARD_RESTORE_DELAY_S, function()
+      hs.pasteboard.setContents(snapshot)
+    end)
+  end
 end
 
 --- Register the caller hook fired on focus-loss self-stop.
