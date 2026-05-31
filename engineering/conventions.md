@@ -43,7 +43,34 @@ If a function has a name, its position in the file encodes its importance. Top =
 - Functions are verbs (`startRecording`, `transcribe`, `verifyDeps`); the module table is a noun (`M`).
 - Boolean variables and functions start with `is`, `has`, `should`, `can` — `isRecording`, `hasModel`, `shouldRetry`.
 - Avoid generic names — `data`, `info`, `item`, `result`, `manager`, `handler` — outside tiny scopes (≤10 lines).
-- No string literals scattered through code to represent states. Extract to module-scoped constants.
+
+## No inline literal values
+
+**String literals that name an environment value, an external identifier, or a code-stable label MUST be module-level constants (or config values when machine-variable), never inline at the call site.** This is principle [A2 in CLAUDE.md][claude-md]; it subsumes the narrower "state strings should be constants" rule that this section replaces.
+
+Categories that always violate the rule when inline:
+
+- **Environment paths** — binary locations (`/usr/bin/curl`, `/opt/homebrew/bin/ffmpeg`), config file paths, scratch dirs.
+- **Network endpoints** — URLs, hosts, ports.
+- **Settings keys and persistence labels** — `hs.settings` keys, `NSUserDefaults` labels.
+- **State and enum labels** — strings that represent a state (`"idle"`, `"streaming"`) or selector value.
+- **Repeat-use log prefixes** — `"[vd-stream]"` appearing across many `print` calls in the same file.
+
+Where the value lives, by class:
+
+1. **Environment-dependent** — Homebrew prefix, model path, user's bin/ directory. The value comes from config. `install.sh` resolves it at install time and writes it into `bin/config.local.sh` (shell-side) or `~/.hammerspoon/voice-dictate-config.lua` (Lua-side); the runtime reads the config key. Hardcoded paths silently break across Apple Silicon / Intel / custom Homebrew prefixes.
+2. **Environment-stable but still naming a thing** — `/usr/bin/curl` exists at the same path on every macOS, but it's still a name. It lives as a module-level `local NAME = "..."` constant in the constants block at the top of the file, with a one-line description above.
+3. **Code-internal labels** — state strings, settings keys, log prefixes. Same: module-level constants.
+
+Carve-outs (when an inline literal is fine):
+
+- **Format-string fragments inside the call** — `"%d"`, `"%s"`, `"^%s+"` and friends are mechanics, not values.
+- **Single-use ad-hoc messages** — `error("expected number")` assembled once at one call site.
+- **Tiny delimiter strings in string operations** — `text:gsub("\n", " ")`.
+
+The rule is about **values that name something**: a path, an endpoint, a key, a state. Format strings and one-shot error text are how a routine is invoked, not configuration.
+
+**Why**: literals at call sites are invisible coupling. They break the install matrix when the environment varies (Homebrew prefix), they hide what is actually configurable, and they let `grep` miss duplicates during a rename. A named constant gives `grep` one target; a config key gives the installer one knob.
 
 ## Comments and docblocks
 
@@ -157,4 +184,5 @@ For bugs on the non-testable surface — audio I/O, Hammerspoon Lua, hotkey hand
 
 [plans-readme]: plans/README.md
 [cde-md]: cde.md
+[claude-md]: ../CLAUDE.md
 [conventional-commits]: https://www.conventionalcommits.org/
