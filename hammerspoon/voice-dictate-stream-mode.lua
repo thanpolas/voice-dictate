@@ -46,16 +46,21 @@ function M.startSession(cfg)
 end
 
 --- End a streaming session. The splice must stay live through stream.stop()
---- because stream may dispatch one final emission (the post-stop fallback
---- when no live emission fired during the session). Teardown order:
----   1. stream.stop(onDone) — SIGTERM ffmpeg, run the post-stop transcription
----      if needed, then invoke onDone.
+--- because stream dispatches one final emission (the post-stop pass that
+--- captures the tail of audio between the last live poll and PTT release).
+--- Teardown order:
+---   1. stream.stop(onDone) — SIGTERM ffmpeg, run the post-stop transcription,
+---      then invoke onDone.
 ---   2. onDone — drop the emission handler now that nothing will fire again,
----      then tear down the splice.
-function M.stopSession()
+---      tear down the splice, then invoke the caller's onDone so it can flip
+---      menubar state out of "finalizing".
+--- @param onDone function|nil Fires after the session has fully wound down,
+---                            including the final emission being pasted.
+function M.stopSession(onDone)
   stream.stop(function()
     stream.setEmissionHandler(nil)
     splice.stopSession()
+    if onDone then onDone() end
   end)
 end
 

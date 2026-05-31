@@ -12,7 +12,12 @@
 ---   M.mount(ctl)       create the menubar item, wire the dropdown + idle icon,
 ---                      hide Hammerspoon's icon (per ctl.hideHsIcon). Idempotent.
 ---   M.unmount()        remove the menubar item. Safe to repeat.
----   M.setStreaming(b)  swap between the idle icon and the `● LIVE` title.
+---   M.setState(s)      swap the title/icon for one of the three states:
+---                      "idle" | "streaming" | "finalizing". "finalizing" is
+---                      the post-stop window where ffmpeg has flushed the
+---                      WAV trailer and the final whisper-server pass is in
+---                      flight — the visual signal that work continues after
+---                      PTT release until the final transcript pastes.
 
 local M = {}
 
@@ -21,8 +26,25 @@ local mic = require("voice-dictate-mic")
 
 -- ───── constants ──────────────────────────────────────────────────────────────
 
+--- The three menubar states. "idle" shows the Dikta mark icon; "streaming"
+--- and "finalizing" show distinct text titles so the user can tell which
+--- phase the session is in. State strings are exposed via setState().
+local STATE_IDLE = "idle"
+local STATE_STREAMING = "streaming"
+local STATE_FINALIZING = "finalizing"
+
 --- Menubar title shown while a streaming session is active. Idle uses an icon.
 local TITLE_STREAMING = "● LIVE"
+
+--- Animation frames shown during the post-stop finalize window. The dot
+--- count cycles to telegraph "work in flight" without making the menubar
+--- width jitter excessively — each frame ends at the same Unicode pad so
+--- the title slot stays roughly the same width across frames.
+local FINALIZING_FRAMES = {"● .  ", "● .. ", "● ..."}
+
+--- Seconds between spinner frames. 0.35s is brisk enough to feel like
+--- progress without flashing.
+local FINALIZING_FRAME_INTERVAL_S = 0.35
 
 --- Text glyph fallback when the canvas idle icon cannot be rendered.
 local TITLE_IDLE_FALLBACK = "○"
@@ -37,6 +59,17 @@ local ctl = nil
 
 --- Pre-rendered idle icon (hs.image template), built once on mount. May be nil.
 local idleIcon = nil
+
+--- Current display state — drives both the menubar title/icon and the
+--- dropdown's status line + toggle label. Updated only via setState().
+local state = STATE_IDLE
+
+--- hs.timer cycling FINALIZING_FRAMES while state == "finalizing". Nil
+--- in every other state; stopped + cleared by stopFinalizingSpinner().
+local spinnerTimer = nil
+
+--- Current index into FINALIZING_FRAMES; advances on each timer tick.
+local spinnerFrame = 1
 
 -- ───── idle icon ──────────────────────────────────────────────────────────────
 
@@ -78,19 +111,44 @@ local function showIdle()
   end
 end
 
---- True while the main module reports an active streaming session.
---- @return boolean
-local function isStreaming()
-  return ctl ~= nil and ctl.isStreaming()
+--- Start cycling the finalizing-spinner frames on the menubar title.
+--- Replaces any running spinner so re-entering finalizing from another
+--- state doesn't leave a stale timer.
+local function startFinalizingSpinner()
+  if not menubar then return end
+  if spinnerTimer then spinnerTimer:stop() end
+  spinnerFrame = 1
+  menubar:setIcon(nil)
+  menubar:setTitle(FINALIZING_FRAMES[spinnerFrame])
+  spinnerTimer = hs.timer.doEvery(FINALIZING_FRAME_INTERVAL_S, function()
+    if not menubar then return end
+    spinnerFrame = (spinnerFrame % #FINALIZING_FRAMES) + 1
+    menubar:setTitle(FINALIZING_FRAMES[spinnerFrame])
+  end)
 end
 
---- Swap between the idle icon and the streaming title.
---- @param streaming boolean True shows `● LIVE`; false restores the idle icon.
-function M.setStreaming(streaming)
+--- Stop the finalizing spinner if it's running. Safe to call any time.
+local function stopFinalizingSpinner()
+  if spinnerTimer then
+    spinnerTimer:stop()
+    spinnerTimer = nil
+  end
+end
+
+--- Transition the menubar between idle / streaming / finalizing. Unknown
+--- state strings collapse to idle so the menubar can never get stuck on a
+--- stale title. State is also read by the dropdown so the status line and
+--- toggle label stay in sync with what the user sees on the bar.
+--- @param s string One of "idle", "streaming", "finalizing".
+function M.setState(s)
+  state = (s == STATE_STREAMING or s == STATE_FINALIZING) and s or STATE_IDLE
+  stopFinalizingSpinner()
   if not menubar then return end
-  if streaming then
+  if state == STATE_STREAMING then
     menubar:setIcon(nil)
     menubar:setTitle(TITLE_STREAMING)
+  elseif state == STATE_FINALIZING then
+    startFinalizingSpinner()
   else
     showIdle()
   end
@@ -99,9 +157,10 @@ end
 -- ───── dropdown ────────────────────────────────────────────────────────────────
 
 --- Status line text for the dropdown header.
---- @return string "Streaming…" while a session is active, otherwise "Idle".
+--- @return string "Streaming…" / "Finalizing…" while busy, otherwise "Idle".
 local function statusText()
-  if isStreaming() then return "Streaming…" end
+  if state == STATE_STREAMING then return "Streaming…" end
+  if state == STATE_FINALIZING then return "Finalizing…" end
   return "Idle"
 end
 
@@ -110,7 +169,7 @@ end
 --- hidden HS icon would otherwise provide (console, reload) plus an icon-restore.
 --- @return table Menu descriptors for hs.menubar:setMenu().
 local function buildMenu()
-  local toggleLabel = (isStreaming() and "Stop Dictation" or "Start Dictation")
+  local toggleLabel = (state ~= STATE_IDLE and "Stop Dictation" or "Start Dictation")
   if ctl.hotkeyHint and ctl.hotkeyHint ~= "" then
     toggleLabel = toggleLabel .. "   " .. ctl.hotkeyHint
   end
@@ -141,6 +200,7 @@ function M.mount(control)
   idleIcon = buildIdleIcon()
   menubar = hs.menubar.new()
   menubar:setMenu(buildMenu)
+  state = STATE_IDLE
   showIdle()
   if ctl.hideHsIcon then hs.menuIcon(false) end
 end
@@ -149,6 +209,7 @@ end
 --- Hammerspoon's icon — that would flicker on every hs.reload(); the
 --- dropdown's "Show Hammerspoon Menu Icon" is the explicit restore path.
 function M.unmount()
+  stopFinalizingSpinner()
   if menubar then menubar:delete(); menubar = nil end
 end
 

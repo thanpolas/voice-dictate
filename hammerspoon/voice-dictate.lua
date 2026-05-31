@@ -92,12 +92,17 @@ local function startSession()
   end
   print("[vd-ptt] startSession: begin")
   streamMode.startSession(cfg)
-  menu.setStreaming(true)
+  menu.setState("streaming")
   playStartCue()
   print("[vd-ptt] startSession: end")
 end
 
---- Stop the active streaming session and reset menubar + audio cue.
+--- Stop the active streaming session. The menubar flips to "finalizing"
+--- immediately so the user gets a visual signal that work continues past
+--- PTT release (ffmpeg flush + whisper-server final pass + splice paste).
+--- When streamMode's onDone fires — after the final transcript has pasted
+--- — the menubar drops to idle. The Pop sound plays on release as the
+--- session-ended cue; the spinner indicates "transcript still incoming".
 --- No-op if nothing is running.
 local function stopSession()
   if not streamMode.isActive() then
@@ -105,9 +110,12 @@ local function stopSession()
     return
   end
   print("[vd-ptt] stopSession: begin")
-  streamMode.stopSession()
-  menu.setStreaming(false)
+  menu.setState("finalizing")
   playStopCue()
+  streamMode.stopSession(function()
+    menu.setState("idle")
+    print("[vd-ptt] stopSession: finalized")
+  end)
   print("[vd-ptt] stopSession: end")
 end
 
