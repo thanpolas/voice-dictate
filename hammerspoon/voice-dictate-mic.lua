@@ -11,6 +11,12 @@
 
 local M = {}
 
+--- User-specific runtime config; install.sh resolves ffmpeg's absolute path at
+--- install time and writes it as cfg.ffmpeg_path. Required because hs.execute
+--- inherits Hammerspoon's minimal launchd PATH and the Homebrew prefix differs
+--- between Apple Silicon (/opt/homebrew) and Intel (/usr/local).
+local cfg = require("voice-dictate-config")
+
 -- ───── constants ────────────────────────────────────────────────────────────
 
 --- avfoundation index used when the user has not yet picked a mic. `:0` is
@@ -22,9 +28,39 @@ local DEFAULT_AUDIO_DEVICE = ":0"
 --- (e.g. ":2"). NSUserDefaults-backed — survives reloads and reboots.
 local SETTINGS_KEY_AUDIO_DEVICE = "voice-dictate.audioDevice"
 
---- Absolute path to ffmpeg used by the device scanner. Hardcoded to the Homebrew
---- prefix because hs.execute inherits Hammerspoon's minimal PATH on launchd.
-local FFMPEG_BIN = "/opt/homebrew/bin/ffmpeg"
+--- Test whether a filesystem path is readable. Used by the ffmpeg-path
+--- fallback when cfg.ffmpeg_path is missing (older configs predating the
+--- install-time path resolution).
+--- @param path string Absolute filesystem path.
+--- @return boolean True iff the path opens for reading.
+local function pathExists(path)
+  local f = io.open(path, "r")
+  if f then f:close(); return true end
+  return false
+end
+
+--- Pick an ffmpeg location. Explicit cfg value wins, otherwise probe the
+--- two common Homebrew prefixes (Apple Silicon then Intel). Last-resort
+--- returns the Apple Silicon path so hs.execute surfaces a clear "no such
+--- file" rather than a load-time crash.
+--- @param fromCfg string|nil Value from cfg.ffmpeg_path, may be nil.
+--- @return string Absolute ffmpeg path.
+local function resolveFfmpegPath(fromCfg)
+  if fromCfg and fromCfg ~= "" and pathExists(fromCfg) then return fromCfg end
+  for _, p in ipairs({"/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"}) do
+    if pathExists(p) then
+      print(string.format(
+        "[vd-mic] ffmpeg_path not in config; falling back to %s — re-run ./install.sh to lock it in",
+        p))
+      return p
+    end
+  end
+  return "/opt/homebrew/bin/ffmpeg"
+end
+
+--- Absolute path to the ffmpeg binary used by the device scanner. Resolved
+--- once at module load — the path does not change at runtime.
+local FFMPEG_BIN = resolveFfmpegPath(cfg.ffmpeg_path)
 
 --- Shell command that lists avfoundation devices. ffmpeg exits non-zero because
 --- no input file is supplied; the device list is on stderr, so we redirect 2>&1.

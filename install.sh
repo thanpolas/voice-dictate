@@ -33,10 +33,10 @@ readonly VD_LUA_CONFIG="${VD_HAMMERSPOON_DIR}/voice-dictate-config.lua"
 # Project-local artifact store; install.sh creates it on first run.
 readonly VD_LOCAL_MODELS_DIR="${REPO_ROOT}/.local/models"
 
-# Default model filename, used when downloading and as the fallback destination.
-readonly VD_DEFAULT_MODEL_FILENAME="ggml-large-v3-turbo-q5_0.bin"
-
 # Default language for the Whisper transcription — Greek primary per spec.
+# VD_DEFAULT_MODEL_FILENAME is declared in install/model.sh and reaches us
+# via the source line below; declaring it here would double-readonly under
+# set -e and abort the script.
 readonly VD_DEFAULT_LANGUAGE="el"
 
 # Source every helper so their public functions are in scope. lib.sh is
@@ -49,8 +49,6 @@ source "${REPO_ROOT}/install/model.sh"
 source "${REPO_ROOT}/install/config.sh"
 # shellcheck source=install/hammerspoon.sh
 source "${REPO_ROOT}/install/hammerspoon.sh"
-# shellcheck source=install/permissions.sh
-source "${REPO_ROOT}/install/permissions.sh"
 
 # Read MODEL_PATH and LANGUAGE from an existing config.local.sh, if any.
 # Echoes "model|language" so the orchestrator can split it; empty fields when
@@ -109,17 +107,27 @@ function cmd_install() {
   local resolved_model
   resolved_model="$(ensure_model "${cfg_model}" "${VD_LOCAL_MODELS_DIR}/${VD_DEFAULT_MODEL_FILENAME}")"
 
+  # Resolve the ffmpeg binary now so the Lua config carries an absolute path.
+  # Hammerspoon launches from launchd with a minimal PATH and cannot look up
+  # `ffmpeg` itself; embedding the resolved path here keeps the streaming
+  # pipeline portable across Apple Silicon (/opt/homebrew) and Intel
+  # (/usr/local) without literals in the Lua module.
+  local ffmpeg_path
+  ffmpeg_path="$(command -v ffmpeg)"
+  if [[ -z "${ffmpeg_path}" ]]; then
+    log error "ffmpeg not found on PATH after dependency setup; cannot continue"
+    exit 1
+  fi
+
   write_shell_config "${VD_SHELL_CONFIG}" "${resolved_model}" "${cfg_language}"
-  write_lua_config "${VD_LUA_CONFIG}" "${REPO_ROOT}/bin/dictate.sh"
+  write_lua_config "${VD_LUA_CONFIG}" "${REPO_ROOT}/bin/dictate.sh" "${ffmpeg_path}"
   link_modules "${VD_SRC_LUA_DIR}" "${VD_HAMMERSPOON_DIR}"
   patch_init_lua "${VD_INIT_LUA}"
   reload_hammerspoon
 
   echo
-  walk_permissions
-
-  echo
-  log ok "voice-dictate installed. Hotkeys: Right Option (PTT), Cmd+Shift+D (toggle)."
+  log ok "voice-dictate installed. Hotkeys: Right Option (PTT), Cmd+Shift+D (toggle)"
+  log info "macOS will prompt for Accessibility, Input Monitoring, and Microphone on first use — grant each when asked."
 }
 
 # Placeholder for the tagged-release update flow; real logic lands in the

@@ -1,20 +1,23 @@
 --- @fileoverview Menubar command center for voice-dictate (Dikta): the single
 --- menubar item, its dropdown, the idle icon (rendered in code via hs.canvas),
---- the recording title, and the transcription spinner.
+--- and the streaming title.
 ---
 --- Hides Hammerspoon's own menu icon so this is the one control surface, and
 --- surfaces the Hammerspoon Console + reload in the dropdown since hiding the
---- icon removes their usual access. The main module owns recording state and
+--- icon removes their usual access. The main module owns session state and
 --- behavior; this module owns everything shown in the menu bar and is driven
 --- through an injected control table (no circular require back into the main).
 ---
 --- Public API:
 ---   M.mount(ctl)       create the menubar item, wire the dropdown + idle icon,
 ---                      hide Hammerspoon's icon (per ctl.hideHsIcon). Idempotent.
----   M.unmount()        remove the menubar item + stop the spinner. Safe to repeat.
----   M.setRecording(b)  swap between the idle icon and the `● REC` title.
----   M.startSpinner()   animate the braille spinner during transcription.
----   M.stopSpinner()    stop it and restore the idle icon.
+---   M.unmount()        remove the menubar item. Safe to repeat.
+---   M.setState(s)      swap the title/icon for one of the three states:
+---                      "idle" | "streaming" | "finalizing". "finalizing" is
+---                      the post-stop window where ffmpeg has flushed the
+---                      WAV trailer and the final whisper-server pass is in
+---                      flight — the visual signal that work continues after
+---                      PTT release until the final transcript pastes.
 
 local M = {}
 
@@ -23,17 +26,30 @@ local mic = require("voice-dictate-mic")
 
 -- ───── constants ──────────────────────────────────────────────────────────────
 
---- Menubar title shown while recording. Idle uses an icon (see buildIdleIcon).
-local TITLE_RECORDING = "● REC"
+--- The three menubar states. "idle" shows the Dikta mark icon; "streaming"
+--- and "finalizing" show distinct text titles so the user can tell which
+--- phase the session is in. State strings are exposed via setState().
+local STATE_IDLE = "idle"
+local STATE_STREAMING = "streaming"
+local STATE_FINALIZING = "finalizing"
+
+--- Menubar title shown while a streaming session is active. Idle uses an icon.
+local TITLE_STREAMING = "● LIVE"
+
+--- Animation frames shown during the post-stop finalize window — the
+--- canonical Braille-dot spinner sequence. Every glyph is one cell wide
+--- (Unicode U+28xx block), so width stays constant across frames without
+--- the trailing-space padding the ASCII dot variants need.
+local FINALIZING_FRAMES =
+  {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+--- Seconds between spinner frames. 0.1s gives the Braille spinner its
+--- familiar smooth rotation; slower ticks make it look broken rather
+--- than rotating.
+local FINALIZING_FRAME_INTERVAL_S = 0.1
 
 --- Text glyph fallback when the canvas idle icon cannot be rendered.
 local TITLE_IDLE_FALLBACK = "○"
-
---- Braille spinner frames shown while transcription is in flight.
-local SPINNER_FRAMES = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-
---- Seconds between spinner frame updates. 80ms is the standard CLI spinner rate.
-local SPINNER_INTERVAL_S = 0.08
 
 -- ───── module state ───────────────────────────────────────────────────────────
 
@@ -46,8 +62,16 @@ local ctl = nil
 --- Pre-rendered idle icon (hs.image template), built once on mount. May be nil.
 local idleIcon = nil
 
---- hs.timer animating the spinner while transcription runs. Nil otherwise.
+--- Current display state — drives both the menubar title/icon and the
+--- dropdown's status line + toggle label. Updated only via setState().
+local state = STATE_IDLE
+
+--- hs.timer cycling FINALIZING_FRAMES while state == "finalizing". Nil
+--- in every other state; stopped + cleared by stopFinalizingSpinner().
 local spinnerTimer = nil
+
+--- Current index into FINALIZING_FRAMES; advances on each timer tick.
+local spinnerFrame = 1
 
 -- ───── idle icon ──────────────────────────────────────────────────────────────
 
@@ -77,7 +101,7 @@ end
 -- ───── presentation ───────────────────────────────────────────────────────────
 
 --- Show the idle representation: the template icon, or the text glyph fallback.
---- Clears any recording/spinner title.
+--- Clears any streaming title.
 local function showIdle()
   if not menubar then return end
   if idleIcon then
@@ -89,45 +113,45 @@ local function showIdle()
   end
 end
 
---- True while the main module reports an active recording.
---- @return boolean
-local function isRecording()
-  return ctl ~= nil and ctl.isRecording()
-end
-
---- Swap between the idle icon and the recording title.
---- @param recording boolean True shows `● REC`; false restores the idle icon.
-function M.setRecording(recording)
+--- Start cycling the finalizing-spinner frames on the menubar title.
+--- Replaces any running spinner so re-entering finalizing from another
+--- state doesn't leave a stale timer.
+local function startFinalizingSpinner()
   if not menubar then return end
-  if recording then
-    menubar:setIcon(nil)
-    menubar:setTitle(TITLE_RECORDING)
-  else
-    showIdle()
-  end
-end
-
---- Animate the braille spinner while transcription runs. Skips the frame update
---- if recording has (re)started so `● REC` stays visible.
-function M.startSpinner()
-  if not menubar or spinnerTimer then return end
-  local i = 1
+  if spinnerTimer then spinnerTimer:stop() end
+  spinnerFrame = 1
   menubar:setIcon(nil)
-  spinnerTimer = hs.timer.doEvery(SPINNER_INTERVAL_S, function()
-    if menubar and not isRecording() then
-      menubar:setTitle(SPINNER_FRAMES[i])
-    end
-    i = (i % #SPINNER_FRAMES) + 1
+  menubar:setTitle(FINALIZING_FRAMES[spinnerFrame])
+  spinnerTimer = hs.timer.doEvery(FINALIZING_FRAME_INTERVAL_S, function()
+    if not menubar then return end
+    spinnerFrame = (spinnerFrame % #FINALIZING_FRAMES) + 1
+    menubar:setTitle(FINALIZING_FRAMES[spinnerFrame])
   end)
 end
 
---- Stop the spinner and restore the idle icon (unless recording is active).
-function M.stopSpinner()
+--- Stop the finalizing spinner if it's running. Safe to call any time.
+local function stopFinalizingSpinner()
   if spinnerTimer then
     spinnerTimer:stop()
     spinnerTimer = nil
   end
-  if menubar and not isRecording() then
+end
+
+--- Transition the menubar between idle / streaming / finalizing. Unknown
+--- state strings collapse to idle so the menubar can never get stuck on a
+--- stale title. State is also read by the dropdown so the status line and
+--- toggle label stay in sync with what the user sees on the bar.
+--- @param s string One of "idle", "streaming", "finalizing".
+function M.setState(s)
+  state = (s == STATE_STREAMING or s == STATE_FINALIZING) and s or STATE_IDLE
+  stopFinalizingSpinner()
+  if not menubar then return end
+  if state == STATE_STREAMING then
+    menubar:setIcon(nil)
+    menubar:setTitle(TITLE_STREAMING)
+  elseif state == STATE_FINALIZING then
+    startFinalizingSpinner()
+  else
     showIdle()
   end
 end
@@ -135,10 +159,10 @@ end
 -- ───── dropdown ────────────────────────────────────────────────────────────────
 
 --- Status line text for the dropdown header.
---- @return string "Recording…", "Transcribing…", or "Idle".
+--- @return string "Streaming…" / "Finalizing…" while busy, otherwise "Idle".
 local function statusText()
-  if isRecording() then return "Recording…" end
-  if spinnerTimer then return "Transcribing…" end
+  if state == STATE_STREAMING then return "Streaming…" end
+  if state == STATE_FINALIZING then return "Finalizing…" end
   return "Idle"
 end
 
@@ -147,7 +171,7 @@ end
 --- hidden HS icon would otherwise provide (console, reload) plus an icon-restore.
 --- @return table Menu descriptors for hs.menubar:setMenu().
 local function buildMenu()
-  local toggleLabel = (isRecording() and "Stop Dictation" or "Start Dictation")
+  local toggleLabel = (state ~= STATE_IDLE and "Stop Dictation" or "Start Dictation")
   if ctl.hotkeyHint and ctl.hotkeyHint ~= "" then
     toggleLabel = toggleLabel .. "   " .. ctl.hotkeyHint
   end
@@ -170,7 +194,7 @@ end
 --- Create the menubar item, wire the dropdown + idle icon, and hide Hammerspoon's
 --- own menu icon when requested. Idempotent — unmounts any prior item first.
 --- @param control table Injected from the main module:
----   onToggle(), isRecording()->bool, onOpenConsole(), onReload(),
+---   onToggle(), isStreaming()->bool, onOpenConsole(), onReload(),
 ---   onShowHsIcon(), hotkeyHint (string), hideHsIcon (bool).
 function M.mount(control)
   M.unmount()
@@ -178,15 +202,16 @@ function M.mount(control)
   idleIcon = buildIdleIcon()
   menubar = hs.menubar.new()
   menubar:setMenu(buildMenu)
+  state = STATE_IDLE
   showIdle()
   if ctl.hideHsIcon then hs.menuIcon(false) end
 end
 
---- Remove the menubar item and stop the spinner. Safe to call repeatedly. Does
---- NOT restore Hammerspoon's icon — that would flicker on every hs.reload(); the
+--- Remove the menubar item. Safe to call repeatedly. Does NOT restore
+--- Hammerspoon's icon — that would flicker on every hs.reload(); the
 --- dropdown's "Show Hammerspoon Menu Icon" is the explicit restore path.
 function M.unmount()
-  if spinnerTimer then spinnerTimer:stop(); spinnerTimer = nil end
+  stopFinalizingSpinner()
   if menubar then menubar:delete(); menubar = nil end
 end
 

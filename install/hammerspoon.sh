@@ -47,10 +47,14 @@ function patch_init_lua() {
   log ok "patched ${init_lua}"
 }
 
-# Trigger Hammerspoon to reload its config without restarting the app.
-# Uses the hammerspoon:// URL scheme so this works even when Hammerspoon is
-# already running in the background.
+# Launch Hammerspoon if it isn't already running and trigger a config reload.
+# Fire-and-forget — macOS handles the permission prompts at the point of
+# access (eventtap bind, simulated paste, ffmpeg spawn). No walkthrough.
 function reload_hammerspoon() {
+  if ! pgrep -x Hammerspoon >/dev/null; then
+    log info "launching Hammerspoon"
+    open -ga Hammerspoon
+  fi
   open -g "hammerspoon://reload"
   log info "requested Hammerspoon reload"
 }

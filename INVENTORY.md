@@ -25,18 +25,23 @@ Settled engineering rules. Folder switchboard: [engineering/README.md](engineeri
 
 Shell-side recorder and transcriber. Leaf README: [bin/README.md](bin/README.md).
 
-- [bin/dictate.sh](bin/dictate.sh) — Three subcommands (record, transcribe, smoke). Spawned by Hammerspoon; standalone-runnable.
+- [bin/dictate.sh](bin/dictate.sh) — Single-shot record/transcribe (record, transcribe, smoke). Kept for ad-hoc shell use; no hotkey reaches it any more.
+- [bin/stream.sh](bin/stream.sh) — Streaming recorder: long-running ffmpeg AVFoundation capture to a session WAV; spawned by Hammerspoon, signalled via SIGTERM at session end.
+- [bin/stream-server.sh](bin/stream-server.sh) — Streaming inference daemon lifecycle (start/stop/status); keeps whisper-server loaded on loopback so per-tick inference pays no model-load tax.
 - [bin/test-record-shutdown.sh](bin/test-record-shutdown.sh) — End-to-end test of record shutdown — SIGTERM forwarding, no orphan ffmpegs, WAV duration preserved.
 - [bin/test-transcribe-output.sh](bin/test-transcribe-output.sh) — Regression test asserting `transcribe` output is free of ANSI escape bytes, direct and via `bash -c`.
-- [bin/monitor-ghosts.sh](bin/monitor-ghosts.sh) — Background watchdog that logs ffmpeg-recording PID transitions to `/tmp/voice-dictate-ghost-watch.log`.
+- [bin/monitor-ghosts.sh](bin/monitor-ghosts.sh) — Background watchdog that logs ffmpeg-recording PID transitions to repo-local `tmp/ghost-watch.log`.
 
 ## [hammerspoon/](hammerspoon/)
 
 Lua module loaded from the user's `~/.hammerspoon/init.lua`. Leaf README: [hammerspoon/README.md](hammerspoon/README.md).
 
-- [hammerspoon/voice-dictate.lua](hammerspoon/voice-dictate.lua) — Hotkey handlers, state machine, recording, paste. Public API: `M.start()` / `M.stop()`.
-- [hammerspoon/voice-dictate-menu.lua](hammerspoon/voice-dictate-menu.lua) — Menubar command center: idle icon, dropdown, recording title, spinner; hides Hammerspoon's icon.
+- [hammerspoon/voice-dictate.lua](hammerspoon/voice-dictate.lua) — Hotkey handlers (PTT + toggle) driving streaming via voice-dictate-stream-mode. Public API: `M.start()` / `M.stop()`.
+- [hammerspoon/voice-dictate-menu.lua](hammerspoon/voice-dictate-menu.lua) — Menubar command center: idle icon, dropdown, `● LIVE` streaming title; hides Hammerspoon's icon.
 - [hammerspoon/voice-dictate-mic.lua](hammerspoon/voice-dictate-mic.lua) — Mic picker: avfoundation device scan, Microphone submenu, NSUserDefaults persistence.
+- [hammerspoon/voice-dictate-stream.lua](hammerspoon/voice-dictate-stream.lua) — Streaming pipeline orchestrator: spawns bin/stream.sh + bin/stream-server.sh, polls every ~2s, POSTs WAV snapshots to /inference, dispatches each transcript to a registered handler.
+- [hammerspoon/voice-dictate-splice.lua](hammerspoon/voice-dictate-splice.lua) — Clipboard-mediated splice paste layer; owns D3 divergence skip, D4 clipboard preservation, D6 focus-loss stop.
+- [hammerspoon/voice-dictate-stream-mode.lua](hammerspoon/voice-dictate-stream-mode.lua) — Streaming session orchestrator; composes voice-dictate-stream + voice-dictate-splice into startSession/stopSession called from the main module's hotkeys.
 
 ## [brand/](brand/)
 
@@ -53,7 +58,6 @@ Bootstrapper helpers sourced by the top-level `install.sh`. Stubs today; behavio
 - [install/lib.sh](install/lib.sh) — Shared interactive prompt, logging, and command-presence helpers used by every other install helper.
 - [install/deps.sh](install/deps.sh) — Homebrew detection and bootstrap; per-dependency install prompts; brew install dispatch.
 - [install/model.sh](install/model.sh) — Whisper model discovery across known locations and resumable download to project-local storage.
-- [install/permissions.sh](install/permissions.sh) — macOS System Settings walkthrough for Accessibility, Input Monitoring, and Microphone panes.
 - [install/hammerspoon.sh](install/hammerspoon.sh) — Symlink the Lua modules, patch the user's init script, and trigger a Hammerspoon reload.
 - [install/config.sh](install/config.sh) — Generate the shell-side and Lua-side runtime configuration files from prompted values.
 - [install/migration.sh](install/migration.sh) — Version-to-version migration entry point invoked by the orchestrator's update flow.

@@ -1,168 +1,170 @@
 # 2026-05-26 — Streaming / on-the-fly transcription
 
-Owner: thanpolas. Status: draft — exploratory; revisits a v0.1 non-goal; open questions flagged.
+Owner: thanpolas. Status: draft — architecture committed (B-step); calibration deferred to spike.
 
-This plan reopens a decision the [v0.1 spec][v01-spec] made deliberately. Under § Non-goals the spec wrote: "Streaming / partial transcription. Record-then-transcribe is fine for utterances under ~30s." That was the right call for shipping v0.1 — it bought accuracy-first behaviour and a dead-simple pipeline (one WAV, one `whisper-cli` run, one paste). This plan asks whether the calculus has changed and what a streaming pipeline would cost. It is Goal 2c in the command-center UX track. It does not supersede the v0.1 spec; the spec stays frozen as historical, and this plan becomes the source of truth for the streaming contract if and when it ships.
-
-## What changed since the non-goal was set
-
-Three things make streaming worth re-examining now, none of which were true at v0.1 lock:
-
-- **The pipeline is already async and decoupled.** The 2026-05-24 changelog moved transcription off `hs.execute` onto `hs.task`, and [`startRecording`][lua] now fires transcription from the record task's own exit callback — not a timer. The machinery to spawn a long-lived child, stream its stdout, and react to it incrementally already exists; streaming is a different consumer of the same seam, not a new architecture.
-- **Long-utterance latency is a known sore point.** v0.1 Open Question 3 flags that a 60s utterance costs ~12s of dead wait at ~5x realtime. Streaming's entire value proposition is collapsing that tail: text appears *while* you speak, so perceived latency at end-of-speech is near-zero regardless of utterance length.
-- **whisper.cpp now ships first-class VAD.** Recent whisper.cpp has built-in Silero VAD (`--vad`) in `whisper-cli` itself, plus a dedicated `vad-speech-segments` tool and the long-standing SDL2 `whisper-stream` example. The "when to cut a segment" problem the user names is now partly solved by upstream tooling rather than something we must hand-roll from scratch.
-
-What has **not** changed: the accuracy-first mandate. v0.1 § Goals: "Latency: accuracy-first. Up to ~5 seconds from speech end to pasted text is acceptable." Streaming trades accuracy for latency — be honest that this is a real cost (see [Decisions][decisions] D6 and [Risks][risks]), and that for short utterances streaming may be strictly worse than today.
+This plan reopens a decision the [v0.1 spec][v01-spec] made deliberately. Under § Non-goals: "Streaming / partial transcription. Record-then-transcribe is fine for utterances under ~30s." That bought v0.1 accuracy-first behaviour and a dead-simple pipeline. This plan is the source of truth for the streaming contract going forward and reopens that non-goal as an opt-in mode.
 
 ## Goal
 
-Transcribe segments of an utterance **on the fly while recording is still ongoing**, emitting text into the field as the user keeps speaking — instead of recording the whole utterance to a WAV, then transcribing once, then pasting. The user's framing names the crux: "the biggest question is when to cut a segment — can we monitor live mic levels and cut on silence?" Segmentation (VAD / silence-based) is therefore the central design problem, not an afterthought.
+Text appears in the focused field **while the user is still speaking** — within ~1s of speech start, not after a clause-ending pause and not after the user stops. Earlier text gets *revised in place* as the model hears more context and changes its mind about what was said.
 
-## Constraints and forces
+Target surface: plain-text fields — prompt boxes (Claude Code input, browser chat inputs), search bars, single-line and plain-textarea inputs, Terminal prompts. Rich-text editors (Slack, Gmail, Notion, iMessage) are explicitly out of scope: `Cmd+X` on styled content yields RTF/HTML the splice cannot reliably modify.
 
-- macOS-only, Apple Silicon. ffmpeg + avfoundation + whisper.cpp + Hammerspoon Lua only. No new runtime ([conventions.md][conventions-md] § Shell/Lua specifics). Streaming must not introduce Python/Node.
-- The current `record`/`transcribe` split in [`dictate.sh`][dictate] is load-bearing and battle-tested: the bash-wrapper SIGINT-forwarding dance, the "exactly one SIGTERM" rule, and the WAV-trailer-flush-on-exit behaviour are all documented invariants with end-to-end tests (`bin/test-record-shutdown.sh`). A streaming design either *evolves* this (chunked, shape A) or *replaces* it (true streaming, shape B). Replacing it discards proven signal-handling code; flag the regression risk.
-- Accuracy-first is the standing mandate. Whisper is an encoder-decoder transformer trained on **30-second** windows; cutting audio into short chunks throws away cross-segment context, fragments sentences, and — per research — raises WER and hallucination rates at boundaries. This is the core tension of the whole plan.
-- The 200-line soft cap applies ([conventions.md][conventions-md] § File and function size). `dictate.sh` is ~100 lines; a streaming subcommand with VAD-boundary parsing is a distinct concern and a clean split trigger — it belongs in a sibling (e.g. `bin/stream.sh`) or a new `stream` subcommand that delegates to a helper, not inlined into `record`/`transcribe`.
-- whisper.cpp tool availability is a hard dependency question. `whisper-cli` is confirmed present (it is what we use today). `whisper-stream` requires SDL2 and is an *example* target — whether the brew formula actually installs it into `bin/` is **unverified** and gates shape B entirely. See [Open questions][openq].
-- **Hard conflict with the cursor-lock async-paste plan** ([2026-05-26-cursor-lock-async-paste.md][p-2a], Goal 2a). That plan defers a *single* paste to a *locked* field after the user has roamed away; streaming pastes *incrementally* into the *live* focused field. These are mutually exclusive at the paste layer. See [Conflict with cursor-lock async paste][conflict] for the arbitration proposal.
+The architectural commitment: a long-lived `whisper-stream` process emits revisable hypotheses over a sliding audio window; the paste layer replaces our pasted region in-place on each emission via clipboard-mediated splice. This is the only shape that gets text on-screen *as you speak* — the alternatives only emit at clause boundaries. See [Historical alternatives][hist].
+
+## What changed since the v0.1 non-goal was set
+
+Four things, none of which were true at v0.1 lock:
+
+- **The pipeline is already async and decoupled.** Transcription runs on `hs.task`; [`startRecording`][lua] fires from the record task's own exit callback. The machinery to spawn a long-lived child, stream stdout, and react to it incrementally already exists. Streaming is a different consumer of the same seam, not a new architecture.
+- **Long-utterance latency is a known sore point.** v0.1 Open Question 3 flags that a 60s utterance costs ~12s of dead wait at ~5x realtime. Streaming collapses that tail entirely.
+- **`whisper-stream` is installed.** Verified 2026-05-28: `/opt/homebrew/bin/whisper-stream` ships with `brew install whisper-cpp` (1.8.4 on this machine). SDL2 bundled via the formula's build deps. No install-time work needed.
+- **Clipboard-mediated splice is viable for plain-text fields.** `Shift+Cmd+Up` extends selection from cursor to start of document on native macOS text views, leaving any suffix the user has typed untouched. `Cmd+X` cuts that range to the clipboard; we modify the clipboard string in code (find our last-pasted dictation, replace with the new emission); `Cmd+V` paints the result back. Cursor lands at end-of-paste — equivalent to live-typing. No accessibility-API fragility, no per-app "select last N chars" primitive needed.
+
+## Constraints
+
+- macOS-only, Apple Silicon. ffmpeg + avfoundation + whisper.cpp + Hammerspoon Lua only. No new runtime ([conventions.md][conventions-md] § Shell/Lua specifics).
+- Target plain-text fields only. Rich-text scope is excluded by design, not deferred.
+- The proven `record` / `transcribe` path stays the always-available floor. Streaming layers beside it, opt-in, and does not modify the single-shot pipeline.
+- 200-line soft cap applies. `dictate.sh` is ~100 lines; streaming is a clean split trigger — new sibling `bin/stream.sh`, not inlined into `record` / `transcribe`.
+- Accuracy-first remains the v0.1 mandate *for the default path*. Streaming sacrifices accuracy for liveness — single-pass `whisper-cli` on a full utterance will outperform sliding-window streaming. This is a deliberate trade, justified by mode-opt-in (D5).
 
 ## Decisions
 
-**D1 — Recommended architecture: (A) chunked segment-and-transcribe, NOT (B) true sliding-window streaming.**
+**D1 — Architecture: `whisper-stream` step mode + clipboard-mediated splice.**
 
-Two architectural shapes were on the table:
+A single long-lived `whisper-stream` process owns audio capture and sliding-window inference. Every `--step` ms it emits the current transcription of the recent audio window to stdout. Hammerspoon consumes the stream via `hs.task` stdout callbacks. On each emission, the Lua paste layer:
 
-- **(A) Chunked.** Keep ffmpeg recording continuously. Split the stream into segment WAVs at silence boundaries. Fire `whisper-cli` per *closed* segment. Paste each segment's text as it finalizes. Mostly reuses today's tools — `whisper-cli` is already our transcriber, ffmpeg is already our recorder.
-- **(B) True streaming.** Pipe live mic audio into `whisper-stream` with a sliding window (`--step`/`--length`/`--keep`), consume incremental hypotheses as they emit. Lower latency, but partial hypotheses get *revised* as more audio arrives — "text already pasted, then corrected" becomes a paste-layer nightmare.
+1. Computes the new full dictation text — combination of the committed prefix accumulated so far plus the latest emission's content (see D2 for the commit-vs-tail distinction).
+2. Synthesizes `Shift+Cmd+Up` (extend selection from cursor to start of document on macOS native text views).
+3. Synthesizes `Cmd+X` (cut selection to clipboard).
+4. Reads the clipboard, finds the substring matching our **last-pasted dictation text**, replaces it with the new full text.
+5. Writes the modified string back to the clipboard.
+6. Synthesizes `Cmd+V`.
+7. Updates state: `last_pasted_dictation_text` = new full text.
 
-Choose **(A)**, for these reasons:
+Cursor lands at end-of-paste, exactly where it would be after live-typing. Any pre-existing field content *before* our dictation anchor is preserved (cut and re-pasted alongside our revision in the same `Cmd+V`). Any pre-existing content *after* the cursor is never selected and never touched.
 
-- **It reuses proven tooling.** `whisper-cli -nt -np` is exactly today's transcribe call; a chunk is just a shorter WAV. No dependency on `whisper-stream` being installed (see D2 and [Open questions][openq]). No SDL2.
-- **It paste-finalizes, never retracts.** A chunk is only transcribed and pasted *after* its closing silence — the text is final, not a revisable hypothesis. This sidesteps the entire "paste-then-correct" problem that makes (B) hostile to a synthetic-keystroke paste model (you cannot un-type into an arbitrary app's text field; there is no reliable programmatic "select last N chars and replace").
-- **It degrades to today's behaviour.** A single-segment utterance (the user speaks without pausing) is exactly record-then-transcribe — one chunk, one transcribe, one paste. Streaming is purely additive for multi-pause utterances; short utterances pay nothing.
-- **It keeps the accuracy knobs in reach.** Per-chunk `whisper-cli` can take `--prompt` (prior chunk's text as context priming) and we control chunk length to respect the 30s window. (B) hides these inside the stream example's fixed window logic.
+**D2 — Whisper-stream parameters and the commit-vs-tail distinction.**
 
-(B) stays documented as the rejected alternative and a future option *iff* `whisper-stream` proves installed and the revision problem gets a real answer (see [Open questions][openq]). It is genuinely lower-latency; it is rejected on paste-model incompatibility and dependency risk, not on latency.
+`whisper-stream` in step mode emits the transcription of overlapping audio windows: emission N covers `[t_N, t_N + length]`; emission N+1 covers `[t_N + step, t_N + step + length]`. The two overlap by `length - step` ms. The same audio gets transcribed multiple times with increasing context — that's where revisions come from.
 
-**D2 — `whisper-stream` availability is a research gate; (A) does not depend on it.**
+| Flag | Default | Rationale |
+|---|---|---|
+| `--step` | 500 | Emit every 500ms. The example default of 3000ms is too slow to feel live; 500ms is the threshold where revisions feel responsive without thrashing the paste mechanic. |
+| `--length` | 5000 | 5s sliding window — long enough to give whisper meaningful context, short enough to keep per-emission inference fast (~hundreds of ms on Apple Silicon). |
+| `--keep` | 200 | Carry 200ms of prior window into next emission for boundary continuity. |
+| `--model` | inherited from today's `MODEL` env | Same model the single-shot path uses. |
+| `--language` | inherited from today's `WHISPER_LANG` | Same as today (auto / `el` / `en` / etc.). |
+| `--capture` | from `STREAM_CAPTURE_ID` env | SDL2 device index; **not** the same as ffmpeg's `MIC_INDEX` — calibration item (see [Calibration notes][cal]). |
 
-Research confirms the brew `whisper-cpp` formula builds with `-DWHISPER_SDL2=ON` and `-DWHISPER_BUILD_EXAMPLES=ON`, and the cmake install step installs built examples — so `whisper-stream` is *probably* present in `/opt/homebrew/bin`. But this is **not verified on the user's machine** and the formula's exact `bin.install` set is ambiguous from the formula source alone. The clean, cheap check is `ls /opt/homebrew/bin/whisper-stream` (and `whisper-server`, `vad-speech-segments`). Until that runs, treat `whisper-stream` as MAYBE-present. Choosing (A) means this gate does not block the plan — (A) needs only `whisper-cli`, which we already depend on. If a future revisit wants (B), this check moves from "nice to know" to "blocking dependency," and the [install bootstrapper][install-plan] would need to detect-or-build it (SDL2 adds a brew dep, build complexity, and install-time weight — flag against the bootstrapper's "seamless" goal).
+All are tunable as config keys (`STREAM_STEP_MS`, `STREAM_LENGTH_MS`, `STREAM_KEEP_MS`, `STREAM_CAPTURE_ID`).
 
-**D3 — Recommended segmentation strategy: whisper.cpp's own Silero VAD as the chunker, with ffmpeg `silencedetect` as the fallback/cross-check.**
+**Commit-vs-tail logic.** Audio older than `--length` ms falls out of whisper-stream's window and stops appearing in future emissions. The paste layer must promote those words from the "live tail" (revisable) to the "committed prefix" (final). The simplest workable algorithm: keep state of `committed_prefix` (string) and `live_tail` (string). On each emission, compute how much audio has dropped off the front of the window since the last emission; the corresponding word-prefix of the previous emission becomes part of `committed_prefix`. The remainder of the new emission becomes the new `live_tail`. The full dictation pasted is `committed_prefix + live_tail`. Exact algorithm is calibration-driven (sequence step 1 reveals what whisper-stream actually emits).
 
-The user's question — "can we monitor live mic levels and cut on silence?" — has four candidate answers, compared:
+**D3 — State divergence policy.**
 
-- **whisper.cpp built-in Silero VAD (`--vad --vad-model`)** — recent whisper.cpp can run a Silero VAD model to detect speech regions and chunk internally, exposing `--vad-threshold`, `--vad-min-speech-duration-ms`, `--vad-min-silence-duration-ms`, `--vad-max-speech-duration-s`, and `--vad-samples-overlap`. This is a *learned* speech/non-speech classifier, far more robust to background noise than a raw level gate. **Recommended primary** because the tuning knobs map directly onto the segmentation problem (min-speech filters out coughs/clicks, min-silence is the hangover, max-speech-duration caps a runaway chunk under the 30s window, samples-overlap is the boundary-context mitigation).
-- **ffmpeg `silencedetect`** — emits `silence_start`, `silence_end`, `silence_duration` to **stderr** (and as `lavfi.silence_*` frame metadata), parameterised by `noise=<dB>:d=<seconds>`. Parseable line-by-line as the recording runs. Simple, no model, already-installed. But it is a pure energy threshold: a noisy room, a fan, or keyboard clatter raises the floor and it cuts in the wrong places. **Recommended as the live "when to cut" trigger in the chunked pipeline** (it can run *during* recording on the live ffmpeg stream; Silero VAD via `whisper-cli` operates on a *finished* file), with Silero VAD applied per-chunk as the accuracy refinement.
-- **ffmpeg `segment` muxer / `silenceremove`** — `segment` splits on fixed wall-clock boundaries (wrong — cuts mid-word); `silenceremove` strips silence rather than emitting boundaries. Neither gives "cut here because the user paused." Rejected as primary.
-- **Live RMS / level monitoring (`astats` / `ebur128` / `volumedetect`)** — these report levels but are reporting/metering filters, not boundary emitters; reimplementing silence logic on top of their output duplicates what `silencedetect` already does. Rejected.
+When the splice cuts the field contents to the clipboard, we expect to find `last_pasted_dictation_text` as a substring. Two cases:
 
-The practical recommendation is a **two-tier scheme**: ffmpeg `silencedetect` on the live stream decides *when to close a chunk* (it is the only option that works on a still-recording stream); each closed chunk is then transcribed by `whisper-cli`, optionally with `--vad` so Silero trims/validates the chunk's speech region for accuracy. This gets live cut decisions from ffmpeg and noise-robust transcription from Silero, using only already-installed tools.
+- **Found**: splice as normal — replace it with the new full dictation text, paste.
+- **Not found**: the user has edited our text manually (corrected a word, added punctuation). **Skip the splice.** Write the original cut contents back to the clipboard, paste, take no action on this emission. The user's edit is preserved; the model's revision is discarded for this cycle. On the next emission, try again — the model may have updated to match the user's intent.
 
-**D4 — The segmentation tuning triad: silence threshold, minimum segment length, hangover. There is no universal setting.**
+Exact substring match, no fuzzy matching, no recovery heuristics. One conditional.
 
-"Cut on silence" is three coupled parameters, and getting any one wrong degrades the result:
+**D4 — Clipboard preservation.**
 
-- **Silence threshold (`noise=<dB>`).** How quiet counts as silence. Too sensitive (e.g. `-50dB`) and a quiet room never registers as silence, so chunks never close (latency win lost). Too aggressive (`-30dB`) and it cuts on every inter-word micro-pause, fragmenting sentences and destroying whisper's context (accuracy lost). Mic, room, and gain all move this; it cannot be a single committed constant — it is a config key with a sane default and a documented "tune for your room" note.
-- **Minimum segment length (`--vad-min-speech-duration-ms`).** Discards sub-threshold blips — a click, a breath, a single "um" — so we do not fire `whisper-cli` on 200ms of noise and paste garbage. Too high and short real words ("yes", "ναι") get dropped.
-- **Hangover / minimum silence duration (`silencedetect` `d=` and `--vad-min-silence-duration-ms`).** How long silence must persist before we treat the pause as a true segment boundary rather than a breath between words. This is the single most important latency-vs-fragmentation dial: short hangover (~300ms) = snappy but choppy; long hangover (~800ms–1s) = coherent sentences but a visible lag before each chunk pastes. Natural Greek/English dictation pauses suggest a default around **600–700ms**; this is a guess that needs real-workload tuning (see [Open questions][openq]).
+Today's single-shot path clobbers the clipboard once per utterance. Streaming clobbers it once per `--step` (every 500ms at defaults). Mitigation:
 
-These become config keys (`STREAM_SILENCE_DB`, `STREAM_MIN_SEGMENT_MS`, `STREAM_HANGOVER_MS`) with defaults; the install bootstrapper does not need to prompt for them (advanced, edit-the-file like today's `THREADS`).
+1. Snapshot the pasteboard via `hs.pasteboard.getContents` on streaming-session start.
+2. Use the general pasteboard for splice operations (named pasteboards don't reliably interop with synthetic `Cmd+V` across all apps — verified in sequence step 2).
+3. Restore the snapshot on streaming-session end.
 
-**D5 — Incremental paste: finalize-only, never retract. Paste each segment's text as it closes.**
+Mid-stream the clipboard is unusable — if the user manually copies something while streaming is active, our next splice overwrites it. Documented limitation. Mitigated by streaming being opt-in (D5).
 
-The incremental-paste problem is: text lands in a live field while the user may still be speaking. Two sub-problems and the decisions:
+**D5 — Opt-in mode: separate hotkey, default unchanged.**
 
-- **Ordering.** Segments must paste in spoken order. Because (A) only pastes a chunk *after* it closes, and `whisper-cli` on a short chunk is fast, chunks normally finalize in order. But chunk N+1 can finish transcribing before chunk N if N is long — so paste must be **serialised through a queue**, not fired from each transcribe callback directly. A Lua-side ordered queue (segment index → text) drains in index order; a slow chunk N holds back N+1's paste until N lands. This is new state in the Lua module.
-- **Retraction.** Rejected outright. We never paste a partial hypothesis we might revise (that is (B)'s problem, and we chose (A) specifically to avoid it). Each pasted chunk is final. The cost: no within-chunk correction once pasted — if whisper mis-hears the first chunk, it stays mis-heard. Acceptable, and identical to today's single-shot behaviour applied per-chunk.
+Streaming is **not** the new default. It is selected per-utterance via a distinct hotkey (e.g. `Cmd+Shift+S` alongside the existing record hotkey). The single-shot path keeps its hotkey, behaviour, and accuracy unchanged. A `cfg.streaming_default = true` config flag is the durable "make streaming the default" toggle, decided after sequence step 7's empirical measurement.
 
-Paste mechanism is unchanged from today — `hs.pasteboard.setContents` + synthetic `Cmd+V` — but now fires once per segment with a space/separator between segments. Clipboard clobber is now *repeated* (once per chunk), which makes the clipboard save/restore concern from the [cursor-lock plan][p-2a] D4 more acute, not less.
+Streaming trades accuracy for liveness. Single-pass `whisper-cli` on a full utterance is more accurate than `whisper-stream`'s sliding-window mode. The user picks per utterance: single-shot when accuracy matters (final commit messages, important prose), streaming when liveness matters (interactive prompt iteration).
 
-**D6 — Accept the accuracy cost; mitigate with overlap and prompt-priming, and bound the loss honestly.**
+**D6 — Focus-loss policy.**
 
-Cutting an utterance into chunks costs accuracy. Whisper is trained on 30s windows; per research, deviating from that — especially with short chunks — fragments sentences, loses cross-boundary context, and raises both WER and hallucination rates (hallucination notably rises when the model's chunking heuristics kick in). Two mitigations, both available with our chosen tools:
-
-- **Boundary overlap.** Carry a small tail of the previous chunk into the next (`--vad-samples-overlap`, e.g. 100ms, or an explicit overlap window in the chunked WAV slicing) so boundary words are "heard twice." Reduces dropped/clipped words at cut points.
-- **Prompt-priming.** Pass the *previous chunk's transcript* into the next chunk's `whisper-cli` via `--prompt`. This restores some of the lost left-context — whisper conditions its decoding on the prompt text, improving continuity of terminology and code-switching (directly relevant to this user's Greek+English technical dictation). Cheap to wire: keep the last chunk's clean text in Lua state, pass it down on the next `transcribe` call.
-
-Even with both, expect streaming to be **measurably less accurate than today's single-pass** transcription of the same utterance. The honest framing: streaming wins on *perceived latency for long utterances*; it loses on *transcription quality* and is *neutral-to-worse for short utterances*. This must be stated in the README and is the core reason this is a *mode*, not a replacement (D7).
-
-**D7 — Ship streaming as an opt-in mode, mutually exclusive with cursor-lock async paste. Default stays record-then-transcribe.**
-
-Given the accuracy cost (D6) and the hard conflict with Goal 2a ([Conflict][conflict]), streaming is **not** the new default. It is a mode the user opts into (a config flag and/or a distinct hotkey), and it is mutually exclusive with cursor-lock async paste-back for a given utterance. The default — single-shot, accuracy-first, paste-into-focused-field — is preserved bit-for-bit, exactly as the v0.1 mandate requires. This also keeps the proven `record`/`transcribe` path as the always-available floor; streaming layers beside it, it does not rip it out.
+If the focused application or text field changes mid-stream, the splice would land in the wrong place. The streaming session subscribes to `hs.window.filter` focus events; on focus loss, it **stops the stream immediately** (kill `whisper-stream`, flush state, restore clipboard, no further pastes). The user must explicitly re-trigger streaming after re-focusing. Better than guessing where to resume.
 
 ## Sequence of work
 
-This work has essentially no pure-function smoke surface beyond per-chunk transcription (which is just today's `transcribe` on a shorter WAV, already covered by `bin/test-transcribe-output.sh`). The segmentation + live-stream + ordered-paste logic is audio-I/O and Hammerspoon timing — per [conventions.md][conventions-md] § A4 and the v0.1 testing strategy, those ship with a **manual repro checklist** in the commit body, not an automated test.
-
-1. **Settle the open questions that block coding** (this plan): verify `whisper-stream` presence (informational, since we chose A), pick the segmentation default triad, and get the product call on streaming-as-a-mode vs 2a arbitration.
-2. **Spike segmentation in isolation.** A throwaway script: run `ffmpeg -f avfoundation -i :N -af silencedetect=noise=-35dB:d=0.6 -f null -` and watch `silence_start`/`silence_end` on stderr while speaking with deliberate pauses. Calibrate the threshold/hangover triad (D4) against the user's real mic and room *before* building any pipeline. This is the riskiest unknown; de-risk it first.
-3. **CDE first for the new concern.** Add `bin/stream.sh` (or a `stream` subcommand delegating to a helper) with `@fileoverview` and a stub, plus a `bin/README.md` section describing what it owns, the segmentation contract, and the config keys (D4). No behaviour wired yet.
-4. **Implement live chunking (shape A).** Recording ffmpeg stays as-is for capture; a parallel `silencedetect` read (or ffmpeg writing segment WAVs cut on silence) emits closed-chunk WAV paths. For each closed chunk, run the existing `whisper-cli` path (D1), with `--prompt` priming from the prior chunk and optional `--vad` (D3/D6). Preserve the one-SIGTERM / WAV-flush invariants for the final partial chunk on stop.
-5. **Implement the Lua-side ordered paste queue (D5).** Segment index → text, drained in order; serialise paste so out-of-order transcribe completions still land in spoken order. New module state; keep the main module thin (sibling helper if it pushes the cap).
-6. **Wire the mode switch (D7).** Config flag + (optionally) a distinct hotkey for streaming mode; ensure the default single-shot path is untouched and that streaming and cursor-lock async paste cannot both be active for one utterance.
-7. **Accuracy + latency measurement.** On a real Greek+English workload, compare streaming vs single-shot: end-to-end perceived latency, and a rough WER/quality read on the same spoken passages. This is the go/no-go evidence for whether streaming is worth keeping on.
-8. **Update docs** — `bin/README.md` (new subcommand, config keys, the accuracy-cost note), `hammerspoon/README.md` (mode switch, paste-queue behaviour, mutual exclusion with 2a).
-
-## Conflict with cursor-lock async paste
-
-This is the headline cross-plan tension and it is a **product decision, not an engineering one** — the [cursor-lock async-paste plan][p-2a] flags the same conflict from its side (its § "Interaction with in-flight sibling plans" and Open Question 5). Stating it plainly:
-
-- **Streaming (this plan)** pastes *incrementally* into the *live, currently-focused* field as the user speaks. It only makes sense if the user is *watching the field fill in* — i.e. they have NOT roamed away.
-- **Cursor-lock async paste (Goal 2a)** captures the insertion target at recording-stop (`Tend`), lets the user roam to other windows during transcription, and defers a *single* paste back to the *locked* field on completion.
-
-You cannot do both for one utterance: streaming partial text into a field the user has navigated away from means yanking focus back repeatedly (hostile), and you cannot defer a single paste if you are emitting text continuously.
-
-**Proposed arbitration (mutually exclusive modes):**
-
-- **Streaming is valid only in the "stay focused" posture** — it composes with the cursor-lock plan's D6 fast path (captured app still frontmost = paste immediately, no settle delay). If the user stays in the field, streaming pastes live; if they roam, streaming has nowhere safe to paste.
-- **Selecting streaming for an utterance disables cursor-lock async paste-back for that utterance** (and vice versa). Whichever mode the user is in is the mode that owns the paste layer.
-- Concretely: a `cfg.streaming_mode` flag (and/or a dedicated streaming hotkey distinct from the async-paste hotkey) arbitrates. The two never run for the same recording. This matches the cursor-lock plan's own proposed resolution ("streaming is only valid in the stay-focused mode … cursor-lock async paste-back disables streaming for that utterance"). Since this plan is being written after that one, it accepts and names that dependency here.
-
-**Interaction with the [cursor-loader plan][p-2c]** (Goal 2b): that plan's spinner means "working, please wait" — a discrete transcribe-then-done phase. Under streaming there is no such discrete phase; text flows continuously and the end is fuzzy. Per that plan's own § "Interaction with in-flight plans," the loader under streaming either (a) goes away (the streamed text *is* the feedback) or (b) becomes a subtle "still receiving" pulse that stops at end-of-stream. This plan agrees and owns that decision: in streaming mode, **the streamed text is the primary feedback**; the menubar `● REC` indicator stays (recording is still happening), and the cursor loader is suppressed or downgraded to a passive pulse. No conflict — just a mode-aware feedback choice, resolved here as the streaming plan owns the streaming-mode UX.
+1. **Spike `whisper-stream` emission semantics.** Run the binary against the mic with the shipped defaults; observe stdout. Characterize: (a) cadence — actual ms between emissions, (b) revision behaviour — do successive emissions revise the same words, or are they non-overlapping?, (c) per-emission inference latency on this hardware, (d) how words "fall off" the window (special marker? just absent from next emission?). This is the riskiest unknown; everything downstream depends on it. If emissions are append-only rather than revisable, D1's mechanic still works but degenerates — the latency story still beats the alternatives, but the "text gets corrected as you speak" UX disappears.
+2. **Spike clipboard-mediated splice in isolation.** A throwaway Hammerspoon script that takes a hardcoded `(old_text, new_text)` pair and runs the `Shift+Cmd+Up` → `Cmd+X` → modify → `Cmd+V` chain into the currently-focused field. Test against the target field list: Claude Code input, ChatGPT / Claude.ai chat input, Terminal prompt, browser address bar, macOS Spotlight, native single-line input. For each: cursor lands where expected? Pre-existing prefix preserved? Flicker tolerable at one cycle per 500ms? Any field that fails goes on a documented blocklist.
+3. **CDE the new concern.** Add [`bin/stream.sh`][stream-sh] with `@fileoverview` and a stub that launches `whisper-stream` with the chosen flags. Add the streaming section to [`bin/README.md`][bin-readme] (config keys, target-field scope, accuracy caveat). Add the streaming-mode section to [`hammerspoon/README.md`][hs-readme].
+4. **Wire `whisper-stream` through Hammerspoon.** `hs.task` on `bin/stream.sh`; stdout callback receives emissions; emissions processed serially (one at a time — whisper-stream is single-producer from our side).
+5. **Implement the splice paste layer.** Lua-side state: `committed_prefix`, `live_tail`, `last_pasted_dictation_text`, pasteboard snapshot. The keystroke chain. The substring divergence check (D3). The focus-loss stop (D6). Pasteboard restore on session end (D4).
+6. **Mode switch.** Wire the separate streaming hotkey; ensure single-shot is untouched.
+7. **Measurement on real workload.** Long, multi-pause prompts in real target apps. How does it *feel*? Does revision flicker annoy or help? Does accuracy degrade enough to matter for prompt entry? Go/no-go on flipping `cfg.streaming_default = true`.
+8. **Docs.** `bin/README.md`, `hammerspoon/README.md`. INVENTORY entry is the orchestrator's to add.
 
 ## Cross-doc effects
 
-- [`bin/README.md`][bin-readme] — new `stream.sh` / `stream` subcommand section; new config keys (`STREAM_SILENCE_DB`, `STREAM_MIN_SEGMENT_MS`, `STREAM_HANGOVER_MS`, `STREAM_OVERLAP_MS`); the Size-budget note that the streaming concern has fired a split trigger; an explicit accuracy-cost caveat.
-- [`dictate.sh`][dictate] header `@fileoverview` — if `stream` becomes a subcommand of `dictate.sh`, the subcommand list and the record/transcribe split narrative change. Prefer a sibling `stream.sh` to keep `dictate.sh` under cap.
-- [`hammerspoon/README.md`][hs-readme] — mode-switch documentation, ordered-paste-queue behaviour, mutual exclusion with cursor-lock async paste, streaming-mode feedback (text-as-feedback, loader suppressed).
-- [v0.1 spec][v01-spec] § Non-goals and § "Out of scope" — both name "Streaming / partial transcription" as deferred. The spec stays frozen as historical; this plan is the source of truth for the streaming contract going forward and explicitly reopens that non-goal as an opt-in mode (D7).
-- [Cursor-lock async-paste plan][p-2a] — its Open Question 5 (mode arbitration with streaming) is *answered* by this plan's [Conflict][conflict] section (mutually exclusive modes). That plan need not change; this plan resolves the shared question.
-- [Install bootstrapper plan][install-plan] — only if shape B is ever pursued: detecting/building `whisper-stream` (SDL2) would add an install dependency. Shape A (chosen) adds nothing the bootstrapper does not already handle. Flag, do not assume.
-- `INVENTORY.md` and the plans switchboard — new `bin/stream.sh` (if created) and this plan need entries. **Out of scope for this plan to edit** — the orchestrator owns those switchboards.
+- [`bin/README.md`][bin-readme] — new `stream.sh` section; new config keys (`STREAM_STEP_MS`, `STREAM_LENGTH_MS`, `STREAM_KEEP_MS`, `STREAM_CAPTURE_ID`); target-field scope note (plain-text only); accuracy-cost caveat.
+- [`hammerspoon/README.md`][hs-readme] — streaming hotkey, splice mechanic explained, divergence-skip rule, focus-loss policy, pasteboard preservation behaviour.
+- [`dictate.sh`][dictate] header — no behaviour change to single-shot; mention sibling `stream.sh` in the file overview.
+- [v0.1 spec][v01-spec] § Non-goals — explicitly reopens "Streaming / partial transcription" as an opt-in mode (D5). Spec stays frozen as historical; this plan is the streaming contract.
+- [Install bootstrapper plan][install-plan] — no change. `brew install whisper-cpp` already installs `whisper-stream` with SDL2 bundled.
+- `INVENTORY.md` and the plans switchboard — new `bin/stream.sh` and this plan need entries; out of scope for this plan to edit.
 
 ## Risks
 
-- **Accuracy regression is the headline risk.** Chunking deviates from whisper's 30s training window; research shows this raises WER and hallucination at boundaries. Overlap + prompt-priming (D6) mitigate but do not eliminate it. The go/no-go is the measurement in sequence step 7: if streaming's quality cost is large on the user's real Greek+English workload, the honest outcome is "keep it off by default, or drop it." Confidence that streaming beats today's UX is *moderate*, not high — it depends entirely on the latency-vs-accuracy preference for the user's actual utterance lengths.
-- **Segmentation tuning is fragile and room-dependent.** The threshold/min-length/hangover triad (D4) has no universal setting; a noisy environment makes energy-based `silencedetect` cut in the wrong places. Mitigation: Silero VAD per-chunk (noise-robust) and the spike-first sequence (step 2) to calibrate on the real mic before building. Worst case: choppy, fragmented output that is worse than today.
-- **Discarding proven signal-handling code (if shape B).** The one-SIGTERM / WAV-flush / bash-wrapper-forwarding invariants in [`record`][dictate] are tested and load-bearing. Shape A *keeps* them (recording ffmpeg is unchanged); shape B would replace them with `whisper-stream`'s own lifecycle. Another reason A is recommended — it does not throw away the hardest-won part of the current code.
-- **`whisper-stream` dependency uncertainty (shape B only).** Unverified whether brew installs it; SDL2 build adds install weight. Shape A sidesteps this entirely. Flagged as a gate, not a blocker, because of the A choice.
-- **Ordered-paste races.** Out-of-order transcribe completion (slow chunk N, fast chunk N+1) must be serialised (D5) or text pastes scrambled. New Lua state; a bug here corrupts word order — visible and annoying. Mitigation: explicit index-ordered queue, manual repro with a deliberately slow chunk.
-- **Repeated clipboard clobber.** Per-segment paste clobbers the clipboard once per chunk, amplifying the cursor-lock plan's D4 clipboard concern. If both ship, streaming-mode paste must reuse that plan's save/restore wrapper.
-- **Mode confusion.** Two paste behaviours (streaming live vs cursor-lock deferred) behind flags/hotkeys risks user confusion about "where will my text go." Mitigation: the mutual-exclusion arbitration (D7 / [Conflict][conflict]) and clear menubar/README signalling of the active mode.
+- **`whisper-stream` emission semantics may not be revisable in practice.** D1 assumes successive emissions can rewrite overlapping audio. If step mode actually emits non-overlapping append-only chunks, the splice degenerates and the "text corrects as you speak" UX is lost — though latency to first text still beats the alternatives. Sequence step 1 settles this before any paste-layer code is written. Fallback: append-only splice still works; document the simplification.
+- **Splice cadence flicker.** Every emission is a select → cut → paste cycle. At `--step 500`, that's twice per second of visible flash on the field. Step 2 confirms whether real-world feel is acceptable; if not, raise `--step` to 1000 or 1500 in defaults — trades liveness for calm.
+- **Accuracy regression vs single-shot.** `whisper-stream` over a 5s sliding window cannot match `whisper-cli` over a full utterance, and there is no per-chunk `--prompt` priming available in step mode. Mitigation: streaming is opt-in (D5); the user picks accuracy when they need it.
+- **State divergence corner cases beyond D3.** Substring-match-or-skip handles "user edits our text." Does not handle: app loses focus mid-stream (D6 covers — stop the stream), modal dialog steals input, user clicks elsewhere in the same field. The last case is the ugliest: the cursor moves, `Shift+Cmd+Up` selects from the new cursor position, and the splice can rebuild around our text or corrupt depending on where they clicked. Mitigation: spike (step 2) tests this; if unrecoverable, the streaming-mode README documents "don't click around mid-stream."
+- **Clipboard clobber, mid-stream.** Per-step throughout the session. Snapshot/restore (D4) covers session boundaries; the user copying something mid-stream loses it. Opt-in mode + documentation.
+- **`whisper-stream` lifecycle replaces today's proven SIGTERM/WAV-flush invariants.** New process, new shutdown semantics. Verify cleanly killing `whisper-stream` mid-emission doesn't leave the audio device open, stdout half-flushed, or a zombie SDL2 audio context. This is new code; existing `bin/test-record-shutdown.sh` doesn't cover it. Add a manual repro for the streaming-stop path.
+- **SDL2 capture device numbering differs from avfoundation.** Today's `MIC_INDEX` (avfoundation's ordering) does not map to `whisper-stream`'s `--capture` (SDL2's ordering). The user may need to separately configure `STREAM_CAPTURE_ID`. The spike (step 1) enumerates devices via `whisper-stream` and the bootstrapper or README documents the mapping.
 
-## Open questions
+## Calibration notes
 
-These are unresolved and would materially change the implementation; flagged per [conventions.md][conventions-md] § "a plan is settled when it has no implicit open questions."
+Empirical items the spikes (steps 1–2) settle. Each has a method and a decision rule — not punted questions.
 
-1. **Does the brew `whisper-cpp` formula actually install `whisper-stream` into `/opt/homebrew/bin`?** Research says the formula builds examples with SDL2 and installs built examples, which strongly implies yes — but the formula's exact `bin.install` set is ambiguous and this was **not verified on the user's machine** (the confirming `ls /opt/homebrew/bin/whisper-stream` was not run). Honest status: MAYBE. It does not gate shape A; it gates any future shape B.
-2. **What is the right hangover (`STREAM_HANGOVER_MS`) for natural Greek+English dictation?** The latency-vs-fragmentation dial. Default guess ~600–700ms, but real pause distributions in this user's speech are unknown. Must be calibrated in the sequence step-2 spike, not assumed.
-3. **Does prompt-priming (`--prompt` with prior chunk text) measurably help, or does it propagate errors forward?** Priming restores left-context but can also carry a mis-transcription into the next chunk's bias. Net effect on this user's code-switching workload is unverified — measure in step 7.
-4. **Is streaming actually a win for this user's typical utterance length?** Streaming only beats today's UX for *long, multi-pause* utterances. If the user mostly dictates short bursts (a sentence at a time), today's single-shot is already ≤5s and *more accurate* — streaming would be strictly worse. This is the product question that decides whether the feature ships on by default, off by default, or at all.
-5. **Should shape B (true `whisper-stream`) ever be revisited?** Only if (a) `whisper-stream` is confirmed installed, (b) the paste-then-revise problem gets a real answer (e.g. a per-app allowlist of fields where programmatic select-and-replace is reliable — which is exactly the AX-fragility the cursor-lock plan documents as unreliable), and (c) measured latency gains over shape A justify the dependency. Currently leaning never; documented so it is a decision, not an omission.
-6. **Mode arbitration UX** — flag, dedicated hotkey, or both? D7 proposes mutual exclusion with cursor-lock async paste; the *surface* of the switch (how the user selects streaming) is a product call tied to how 2a exposes its own mode.
+- **Emission semantics**: step 1, by running the binary and observing stdout. Decision: revisable → D1 mechanic as written; append-only → splice degenerates to append, document the simplification, ship.
+- **Cadence defaults**: step 1, by measuring actual emission interval and per-emission inference time. Decision: if 500ms feels jittery or inference exceeds 400ms/step, raise `--step` to 1000ms.
+- **Window length**: step 1, by reading transcript quality across short vs long utterances. Decision: if 5s window drops the start of a 7s thought, raise `--length` to 8000.
+- **SDL2 capture mapping**: step 1, by running `whisper-stream --list-devices` (or equivalent) and matching against the user's expected mic. Decision: document `STREAM_CAPTURE_ID` in the bootstrapper output.
+- **Per-app splice reliability**: step 2, against the target field list. Decision: any field where the splice fails — wrong cursor position, partial paste, app-specific keybinding collision — goes on a documented blocklist; streaming refuses to engage when focused there.
+- **Flicker tolerance**: step 2, subjective. Decision: if visibly jittery in any target app at the calibrated `--step`, raise `--step` further.
+- **Click-mid-stream behaviour**: step 2. Decision: if unrecoverable, document "don't click mid-stream" in the README; if mild, leave the splice to self-correct on the next emission.
+
+## Historical alternatives
+
+Two architectures were seriously considered before B-step was chosen. They are documented here so the rejection is a decision, not an omission.
+
+**Shape A — chunked segment-and-transcribe, our orchestration.** Keep ffmpeg recording continuously. Detect silence boundaries on the live stream via ffmpeg `silencedetect`. Fire `whisper-cli` per *closed* segment with `--prompt` priming from the prior segment for left-context. Paste each segment's text as it finalizes via append-only `Cmd+V`. Tuning triad: `STREAM_HANGOVER_MS` (~600), `STREAM_SILENCE_DB` (~-35), `STREAM_MIN_SEGMENT_MS` (~250).
+
+- **Advantages**: per-chunk `--prompt` priming helps Greek+English code-switching and technical vocabulary; per-chunk WAVs on disk for debugging; preserves today's proven SIGTERM / WAV-flush / bash-wrapper signal-handling; finalize-only paste needs no splice.
+- **Why rejected**: only emits text at clause boundaries. Latency to first text is ~1.2–2.1s *after a pause*, not after speech starts. For long uninterrupted thoughts (the user's stated workload), the first chunk doesn't close until the first pause — by which point the user has waited as long as today. Fails the "text appears while I speak" UX goal that motivates this plan at all.
+
+**Shape B-vad — `whisper-stream` in VAD mode (`--step 0`).** Same `whisper-stream` binary, configured to wait for VAD-detected silence before emitting. Each emission is a finalized segment.
+
+- **Advantages**: model stays loaded across the utterance (saves ~200–500ms per-chunk model load vs A); simpler than A — one process, no ffmpeg orchestration.
+- **Why rejected**: same latency profile as A. Emissions only at silence boundaries. Loses to B-step on the live-text-while-speaking criterion.
+
+Both alternatives are *more accurate* than B-step (A especially, with prompt-priming and chunk overlap). The choice of B-step is a deliberate accuracy-for-liveness trade, made viable by streaming being opt-in: when accuracy matters, the user picks the existing single-shot path; when liveness matters, they pick streaming.
+
+**Paste-then-revise objections — rejected and rebuttal.** Earlier drafts of this plan rejected B-step "outright" on the grounds that synthetic-keystroke paste cannot retract pasted text — the AX API "select last N chars and replace" primitive is unreliable across apps. That framing was wrong. The clipboard-mediated splice (D1) bypasses the AX API entirely by using the clipboard as a working buffer:
+
+- **Pre-existing field content** is preserved via `Shift+Cmd+Up` cutting only `[0, cursor]`, leaving any suffix untouched.
+- **Cursor position** lands at end-of-paste — equivalent to live-typing the revised text.
+- **User edits to our text** are detected via substring-match-or-skip (D3) and never clobbered.
+- **App-specific keybinding collisions** (an earlier draft incorrectly attributed `Cmd+Shift+Up = Move Line Up` to VS Code — that's `Option+Up`; `Cmd+Shift+Up` is "extend selection to start" in VS Code as in native fields) do not apply to the target field set.
+
+What remains — flicker cadence, rich-text scoping, divergence policy — is addressed by D3, D4, the constraints, and the calibration notes. Not architectural blockers.
 
 [v01-spec]: 2026-05-20-v0.1-spec.md
-[p-2a]: 2026-05-26-cursor-lock-async-paste.md
-[p-2c]: 2026-05-26-cursor-loader.md
 [install-plan]: 2026-05-25-install-ux-bootstrap.md
 [conventions-md]: ../conventions.md
 [dictate]: ../../bin/dictate.sh
+[stream-sh]: ../../bin/stream.sh
 [bin-readme]: ../../bin/README.md
 [lua]: ../../hammerspoon/voice-dictate.lua
 [hs-readme]: ../../hammerspoon/README.md
-[decisions]: #decisions
-[risks]: #risks
-[openq]: #open-questions
-[conflict]: #conflict-with-cursor-lock-async-paste
+[hist]: #historical-alternatives
+[cal]: #calibration-notes
