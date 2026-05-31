@@ -26,12 +26,16 @@ The installer appends `require("voice-dictate").start()` to `init.lua`. Nothing 
 ### State machine
 
 ```
-IDLE ──Cmd+Shift+D tap─► STREAMING ──Cmd+Shift+D tap─┐
-                            │                         │
-                            └─ Right Option release ──┴─► IDLE
+IDLE ──Cmd+Shift+D tap─► STREAMING ──Cmd+Shift+D tap──────┐
+                            │                              │
+                            ├─ Right Option release ───────┤
+                            ├─ any ordinary keystroke ─────┤
+                            └─ focus loss ─────────────────┴─► IDLE
 ```
 
 Session state lives in [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua); both hotkeys flip it via the same `startSession`/`stopSession` calls. Pressing the toggle while PTT-streaming (or vice versa) collapses to "stop": last hotkey wins. There is no separate "transcribing" state — emissions arrive continuously and paste live; release means stop.
+
+Four triggers stop an active session, all "stop and keep" (the transcript pasted so far stays, the clipboard is restored): a second toggle tap, Right Option release, **any ordinary keystroke**, and focus loss. The keystroke trigger lets the user just start typing to take over — see [the keypress-stop plan](../engineering/plans/2026-05-31-keypress-stop.md). "Ordinary" means a `keyDown` carrying no Cmd/Ctrl/Alt; that same filter excludes the splice layer's own synthetic `Cmd+X` / `Cmd+V` / `Shift+Cmd+Up` keystrokes, so the session never self-cancels.
 
 ### Why two hotkey mechanisms
 
@@ -39,6 +43,8 @@ Session state lives in [voice-dictate-stream-mode.lua](voice-dictate-stream-mode
 - **PTT** uses `hs.eventtap.new({flagsChanged}, …)` because Right Option is a modifier key, not a regular key. `hs.hotkey.bind` cannot capture modifier presses on their own.
 
 The eventtap filters to `keycode == 61` (Right Option specifically) and uses the alt flag to distinguish press from release.
+
+A third, always-on `keyDown` eventtap implements the keystroke-stop trigger (above). It is observational — it returns `false` so the keystroke passes through to the field — and its handler no-ops unless a session is active. Like the PTT tap, it is created in `bindHotkeys` and torn down in `unbindHotkeys`, so `hs.reload()` never leaks one.
 
 ### Configurable values
 
@@ -133,9 +139,10 @@ Three siblings cooperate to deliver the streaming pipeline that the PTT and togg
 ### State machine
 
 ```
-IDLE ──Cmd+Shift+D tap──► STREAMING ──Cmd+Shift+D tap──┐
-                              │                          │
-                              └─ focus loss / app exit ───┴─► IDLE (clipboard restored)
+IDLE ──Cmd+Shift+D tap──► STREAMING ──Cmd+Shift+D tap───────┐
+                              │                              │
+                              ├─ any ordinary keystroke ─────┤
+                              └─ focus loss / app exit ──────┴─► IDLE (clipboard restored)
 ```
 
 `STREAMING` means the whisper-server daemon and ffmpeg recorder are alive, the timer is polling, and the splice layer is subscribed to the resulting emissions. There is no separate "transcribing" state — emissions arrive every poll tick and paste live.

@@ -55,6 +55,11 @@ local hotkeyToggle = nil
 --- Eventtap watching flagsChanged events to implement push-to-talk on Right Option.
 local pttTap = nil
 
+--- Eventtap watching keyDown events so any ordinary keystroke stops an active
+--- session (see engineering/plans/2026-05-31-keypress-stop.md). Always-on while
+--- mounted, like pttTap; its handler no-ops unless a session is running.
+local keyStopTap = nil
+
 -- ───── helpers ──────────────────────────────────────────────────────────────
 
 --- Format the toggle hotkey as menu-friendly glyphs, e.g. "⌘⇧D".
@@ -149,6 +154,24 @@ local function onFlagsChanged(event)
   return false
 end
 
+--- Keystroke handler. While a session is active, any ordinary key (one whose
+--- flags carry no Cmd/Ctrl/Alt) stops it — the user has started typing, which
+--- is the "I'll take it from here" gesture. The no-modifier filter is also what
+--- keeps the splice layer's own synthetic Cmd+X / Cmd+V / Shift+Cmd+Up from
+--- self-cancelling the session: every synthetic keystroke carries Cmd, as does
+--- the toggle combo, so all of them are excluded by the same test. Stop is
+--- deferred to a zero-delay timer (same rationale as onFlagsChanged) and the
+--- event is never swallowed, so the triggering key lands in the field.
+--- @param event hs.eventtap.event The keyDown event.
+--- @return boolean Always false — never swallow the keystroke.
+local function onKeyStop(event)
+  if not streamMode.isActive() then return false end
+  local flags = event:getFlags()
+  if flags.cmd or flags.ctrl or flags.alt then return false end
+  hs.timer.doAfter(0, stopSession)
+  return false
+end
+
 -- ───── lifecycle ────────────────────────────────────────────────────────────
 
 --- Bind global hotkeys and start the flagsChanged eventtap.
@@ -156,12 +179,15 @@ local function bindHotkeys()
   hotkeyToggle = hs.hotkey.bind(TOGGLE_MODS, TOGGLE_KEY, onToggleTap)
   pttTap = hs.eventtap.new({hs.eventtap.event.types.flagsChanged}, onFlagsChanged)
   pttTap:start()
+  keyStopTap = hs.eventtap.new({hs.eventtap.event.types.keyDown}, onKeyStop)
+  keyStopTap:start()
 end
 
---- Unbind global hotkeys and stop the flagsChanged eventtap.
+--- Unbind global hotkeys and stop the flagsChanged + keyDown eventtaps.
 local function unbindHotkeys()
   if hotkeyToggle then hotkeyToggle:delete(); hotkeyToggle = nil end
   if pttTap then pttTap:stop(); pttTap = nil end
+  if keyStopTap then keyStopTap:stop(); keyStopTap = nil end
 end
 
 --- Mount the command center + bind hotkeys. Idempotent: tears down prior state.
