@@ -36,15 +36,17 @@ local STATE_FINALIZING = "finalizing"
 --- Menubar title shown while a streaming session is active. Idle uses an icon.
 local TITLE_STREAMING = "● LIVE"
 
---- Animation frames shown during the post-stop finalize window. The dot
---- count cycles to telegraph "work in flight" without making the menubar
---- width jitter excessively — each frame ends at the same Unicode pad so
---- the title slot stays roughly the same width across frames.
-local FINALIZING_FRAMES = {"● .  ", "● .. ", "● ..."}
+--- Animation frames shown during the post-stop finalize window — the
+--- canonical Braille-dot spinner sequence. Every glyph is one cell wide
+--- (Unicode U+28xx block), so width stays constant across frames without
+--- the trailing-space padding the ASCII dot variants need.
+local FINALIZING_FRAMES =
+  {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
---- Seconds between spinner frames. 0.35s is brisk enough to feel like
---- progress without flashing.
-local FINALIZING_FRAME_INTERVAL_S = 0.35
+--- Seconds between spinner frames. 0.1s gives the Braille spinner its
+--- familiar smooth rotation; slower ticks make it look broken rather
+--- than rotating.
+local FINALIZING_FRAME_INTERVAL_S = 0.1
 
 --- Text glyph fallback when the canvas idle icon cannot be rendered.
 local TITLE_IDLE_FALLBACK = "○"
