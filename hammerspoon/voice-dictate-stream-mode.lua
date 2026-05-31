@@ -45,12 +45,18 @@ function M.startSession(cfg)
   stream.start(cfg)
 end
 
---- End a streaming session. Drops the emission handler before killing the
---- task so any in-flight stdout doesn't hit a half-torn splice.
+--- End a streaming session. The splice must stay live through stream.stop()
+--- because stream may dispatch one final emission (the post-stop fallback
+--- when no live emission fired during the session). Teardown order:
+---   1. stream.stop(onDone) — SIGTERM ffmpeg, run the post-stop transcription
+---      if needed, then invoke onDone.
+---   2. onDone — drop the emission handler now that nothing will fire again,
+---      then tear down the splice.
 function M.stopSession()
-  stream.setEmissionHandler(nil)
-  stream.stop()
-  splice.stopSession()
+  stream.stop(function()
+    stream.setEmissionHandler(nil)
+    splice.stopSession()
+  end)
 end
 
 --- True iff either the pipeline or the splice is currently active. Both

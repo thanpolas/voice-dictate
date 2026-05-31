@@ -86,19 +86,29 @@ end
 --- Start a streaming session and signal the menubar + audio cue.
 --- No-op if a session is already active.
 local function startSession()
-  if streamMode.isActive() then return end
+  if streamMode.isActive() then
+    print("[vd-ptt] startSession: skip (already active)")
+    return
+  end
+  print("[vd-ptt] startSession: begin")
   streamMode.startSession(cfg)
   menu.setStreaming(true)
   playStartCue()
+  print("[vd-ptt] startSession: end")
 end
 
 --- Stop the active streaming session and reset menubar + audio cue.
 --- No-op if nothing is running.
 local function stopSession()
-  if not streamMode.isActive() then return end
+  if not streamMode.isActive() then
+    print("[vd-ptt] stopSession: skip (not active)")
+    return
+  end
+  print("[vd-ptt] stopSession: begin")
   streamMode.stopSession()
   menu.setStreaming(false)
   playStopCue()
+  print("[vd-ptt] stopSession: end")
 end
 
 -- ───── input handlers ───────────────────────────────────────────────────────
@@ -110,15 +120,23 @@ end
 
 --- PTT handler. Fires on every modifier change; filters to Right Option keycode
 --- and uses the alt flag to distinguish press (start) from release (stop).
+---
+--- The actual start/stop work is deferred to a zero-delay timer so this
+--- callback returns to the eventtap in microseconds. macOS auto-disables
+--- event taps whose callback exceeds the OS-side timeout (~1s); the first
+--- PTT press of a session pays a ~1s tax loading hs.pasteboard,
+--- hs.window.filter, hs.timer, and hs.sound, which without deferral would
+--- starve the very next flagsChanged event (the Right Option release)
+--- and silently drop it. Deferring keeps the tap responsive.
 --- @param event hs.eventtap.event The flagsChanged event.
 --- @return boolean Always false — never swallow the event.
 local function onFlagsChanged(event)
   if event:getKeyCode() ~= RIGHT_ALT_KEYCODE then return false end
   local flags = event:getFlags()
   if flags.alt and not streamMode.isActive() then
-    startSession()
+    hs.timer.doAfter(0, startSession)
   elseif not flags.alt and streamMode.isActive() then
-    stopSession()
+    hs.timer.doAfter(0, stopSession)
   end
   return false
 end

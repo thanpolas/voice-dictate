@@ -19,7 +19,12 @@
 --- Public API:
 ---   M.setEmissionHandler(fn)  Register the per-tick handler. Default no-op.
 ---   M.start(cfg)              Boot server + ffmpeg + timer. Idempotent.
----   M.stop()                  Tear down timer, ffmpeg, server. Safe to repeat.
+---   M.stop(onDone)            Tear down timer + ffmpeg; if no emission landed
+---                             during the session, run one final transcription
+---                             against the now-flushed session WAV and dispatch
+---                             it through the emission handler before invoking
+---                             onDone. whisper-server stays alive across
+---                             sessions; manual `stream-server.sh stop` to kill.
 ---   M.isStreaming()           Query state.
 
 local M = {}
@@ -69,6 +74,11 @@ local pollInFlight = false
 --- Caller-registered handler invoked once per cleaned transcript.
 local onEmission = function(_line) end
 
+--- Callback fired when M.stop() has fully torn down + finalized — including
+--- any post-stop transcription pass. Set by M.stop, invoked by the ffmpeg
+--- exit callback. Nil between sessions.
+local pendingOnDone = nil
+
 -- ───── poll cycle ───────────────────────────────────────────────────────────
 
 --- POST the snapshot WAV to whisper-server and dispatch the parsed transcript.
@@ -77,29 +87,105 @@ local function postSnapshot()
   local task = hs.task.new("/usr/bin/curl",
     function(exit, stdout, _stderr)
       pollInFlight = false
-      if exit ~= 0 or stdout == nil or stdout == "" then return end
+      if exit ~= 0 then
+        print(string.format("[vd-stream] skip: curl exit=%d", exit))
+        return
+      end
+      if stdout == nil or stdout == "" then
+        print("[vd-stream] skip: empty stdout")
+        return
+      end
       local ok, parsed = pcall(hs.json.decode, stdout)
       if not ok or type(parsed) ~= "table" or type(parsed.text) ~= "string" then
+        print("[vd-stream] skip: bad json")
         return
       end
       local text = parsed.text:gsub("^%s+", ""):gsub("%s+$", "")
-      if text == "" or text == lastDispatchedText then return end
+      if text == "" then
+        print("[vd-stream] skip: empty text")
+        return
+      end
+      if text == lastDispatchedText then
+        print("[vd-stream] skip: dup")
+        return
+      end
       lastDispatchedText = text
+      print(string.format("[vd-stream] emit: %s", text))
       onEmission(text)
     end,
     {"-s", "-F", "file=@" .. SNAPSHOT_WAV, SERVER_URL})
   task:start()
 end
 
+--- Final-pass transcription fired by the ffmpeg exit callback after M.stop().
+--- Runs unconditionally on stop: ffmpeg has now flushed the WAV trailer so
+--- the snapshot+POST succeeds where the live-poll path may have failed with
+--- AVERROR_INVALIDDATA (exit 183) early in the session, AND captures the
+--- 1-2s tail of audio between the last live poll and the PTT release that
+--- would otherwise be lost. The result is dispatched through onEmission
+--- (still the splice handler until the caller's onDone runs), so even
+--- utterances shorter than the live-poll's first-success threshold paste
+--- a transcript, and longer ones get their tail captured. Dedup against
+--- lastDispatchedText prevents a no-op splice flash when the final pass
+--- exactly matches the last live emission.
+--- @param onDone function|nil Invoked after the emission has been dispatched
+---                            (success or failure), so the caller can finish
+---                            tearing down state (e.g. splice.stopSession).
+local function finalizeAndEmit(onDone)
+  print("[vd-stream] finalize: begin")
+  hs.task.new("/opt/homebrew/bin/ffmpeg",
+    function(exit, _stdout, _stderr)
+      if exit ~= 0 then
+        print(string.format("[vd-stream] finalize: snapshot exit=%d", exit))
+        os.remove(SNAPSHOT_WAV)
+        if onDone then onDone() end
+        return
+      end
+      hs.task.new("/usr/bin/curl",
+        function(curlExit, stdout, _curlStderr)
+          if curlExit ~= 0 then
+            print(string.format("[vd-stream] finalize: curl exit=%d", curlExit))
+          elseif stdout == nil or stdout == "" then
+            print("[vd-stream] finalize: empty stdout")
+          else
+            local ok, parsed = pcall(hs.json.decode, stdout)
+            if not ok or type(parsed) ~= "table" or type(parsed.text) ~= "string" then
+              print("[vd-stream] finalize: bad json")
+            else
+              local text = parsed.text:gsub("^%s+", ""):gsub("%s+$", "")
+              if text == "" then
+                print("[vd-stream] finalize: empty text")
+              elseif text == lastDispatchedText then
+                print("[vd-stream] finalize: dup")
+              else
+                lastDispatchedText = text
+                print(string.format("[vd-stream] finalize emit: %s", text))
+                onEmission(text)
+              end
+            end
+          end
+          os.remove(SNAPSHOT_WAV)
+          if onDone then onDone() end
+        end,
+        {"-s", "-F", "file=@" .. SNAPSHOT_WAV, SERVER_URL}):start()
+    end,
+    {"-hide_banner", "-loglevel", "error", "-y",
+     "-i", SESSION_WAV, "-c", "copy", SNAPSHOT_WAV}):start()
+end
+
 --- Finalise the in-progress session WAV into a snapshot the server can parse,
 --- then chain into the POST. Two hs.task spawns per tick (snapshot, POST) so
 --- neither blocks the Hammerspoon main thread.
 local function snapshotAndPost()
-  if pollInFlight then return end
+  if pollInFlight then
+    print("[vd-stream] skip: poll in flight")
+    return
+  end
   pollInFlight = true
   local task = hs.task.new("/opt/homebrew/bin/ffmpeg",
     function(exit, _stdout, _stderr)
       if exit ~= 0 then
+        print(string.format("[vd-stream] skip: snapshot exit=%d", exit))
         pollInFlight = false
         return
       end
@@ -123,7 +209,11 @@ end
 --- M.start() while running exits early.
 --- @param cfg table Optional config; .stream_sh and .server_sh override paths.
 function M.start(cfg)
-  if isStreaming then return false end
+  if isStreaming then
+    print("[vd-stream] start: skip (already streaming)")
+    return false
+  end
+  print("[vd-stream] start: begin")
   local streamSh = (cfg and cfg.stream_sh) or DEFAULT_STREAM_SH
   local serverSh = (cfg and cfg.server_sh) or DEFAULT_SERVER_SH
   os.remove(SESSION_WAV)
@@ -131,30 +221,59 @@ function M.start(cfg)
   pollInFlight = false
   hs.task.new(serverSh, function(_exit, _stdout, _stderr) end, {"start"}):start()
   ffmpegTask = hs.task.new(streamSh,
-    function(_exit, _stdout, _stderr) end,
+    function(exit, _stdout, _stderr)
+      print(string.format("[vd-stream] ffmpeg exit=%d", exit))
+      -- ffmpeg only exits when M.stop() sent it SIGTERM (or it crashed). At
+      -- this point the session WAV has its trailer flushed and is a valid
+      -- input for inference. Always run one final transcription, even when
+      -- live emissions fired during the session: there's always 1-2s of
+      -- audio between the last live poll's snapshot and the user's PTT
+      -- release that would otherwise be silently dropped. The dedup check
+      -- inside finalizeAndEmit prevents a no-op flash when the final pass
+      -- matches the last live emission. The pendingOnDone hook (set by
+      -- M.stop) is invoked after the final emission dispatches so the
+      -- caller can tear down the splice with the transcript already pasted.
+      local cb = pendingOnDone
+      pendingOnDone = nil
+      finalizeAndEmit(cb)
+    end,
     {"record", SESSION_WAV})
   ffmpegTask:start()
   pollTimer = hs.timer.doEvery(POLL_INTERVAL_S, snapshotAndPost)
   isStreaming = true
+  print("[vd-stream] start: end")
   return true
 end
 
---- Tear down the pipeline in reverse order: timer first, ffmpeg next, server
---- last. The server stays up across sessions in principle, but tearing it
---- down on M.stop keeps the lifecycle simple — start always pays the
---- ~1s warm-up. Re-evaluate if that latency becomes a friction point.
-function M.stop()
+--- Tear down the pipeline: stop the timer, mark not-streaming so any
+--- in-flight poll bails, then SIGTERM ffmpeg. The ffmpeg exit callback
+--- (set in M.start) handles the post-stop transcription pass and fires
+--- onDone when the session is fully wound down.
+---
+--- whisper-server is intentionally NOT stopped here. The model load is
+--- ~14s of warmup that every session would otherwise eat on a cold start,
+--- which makes short utterances impossible to transcribe in the live
+--- poll path. Leaving the server alive across sessions trades ~2GB of
+--- resident memory for instant-feeling subsequent sessions. To kill it
+--- manually, run `bin/stream-server.sh stop`.
+--- @param onDone function|nil Fires when ffmpeg has exited and the post-
+---                            stop transcription (if any) has dispatched.
+---                            If no ffmpeg task was active, fires inline.
+function M.stop(onDone)
+  print(string.format("[vd-stream] stop: begin isStreaming=%s", tostring(isStreaming)))
   if pollTimer then pollTimer:stop(); pollTimer = nil end
+  isStreaming = false
   if ffmpegTask then
+    pendingOnDone = onDone
     local pid = ffmpegTask:pid()
     if pid and pid > 0 then
       hs.task.new("/bin/kill", nil, {"-TERM", tostring(pid)}):start()
     end
     ffmpegTask = nil
+  elseif onDone then
+    onDone()
   end
-  hs.task.new(DEFAULT_SERVER_SH, nil, {"stop"}):start()
-  os.remove(SNAPSHOT_WAV)
-  isStreaming = false
+  print("[vd-stream] stop: end")
 end
 
 --- Query state.
