@@ -48,6 +48,15 @@ local DEFAULT_SERVER_SH = os.getenv("HOME") ..
 --- HTTP endpoint the daemon serves. Port matches stream-server.sh's default.
 local SERVER_URL = "http://127.0.0.1:8472/inference"
 
+--- Absolute path to system curl. Stable across every macOS install
+--- (system-provided, not Homebrew). Named here per A2 — no inline literals
+--- at hs.task call sites.
+local CURL_BIN = "/usr/bin/curl"
+
+--- Absolute path to system kill. Stable across every macOS install.
+--- Named here per A2 — no inline literals at hs.task call sites.
+local KILL_BIN = "/bin/kill"
+
 --- Seconds between polls. 2s balances "feels live" vs whisper inference cost
 --- on M-series with large-v3-turbo over a growing session WAV.
 local POLL_INTERVAL_S = 2.0
@@ -128,7 +137,7 @@ end
 --- POST the snapshot WAV to whisper-server and dispatch the parsed transcript.
 --- Runs after the snapshot finalisation step completes successfully.
 local function postSnapshot()
-  local task = hs.task.new("/usr/bin/curl",
+  local task = hs.task.new(CURL_BIN,
     function(exit, stdout, _stderr)
       pollInFlight = false
       if exit ~= 0 then
@@ -185,7 +194,7 @@ local function finalizeAndEmit(onDone)
         if onDone then onDone() end
         return
       end
-      hs.task.new("/usr/bin/curl",
+      hs.task.new(CURL_BIN,
         function(curlExit, stdout, _curlStderr)
           if curlExit ~= 0 then
             print(string.format("[vd-stream] finalize: curl exit=%d", curlExit))
@@ -319,7 +328,7 @@ function M.stop(onDone)
     pendingOnDone = onDone
     local pid = ffmpegTask:pid()
     if pid and pid > 0 then
-      hs.task.new("/bin/kill", nil, {"-TERM", tostring(pid)}):start()
+      hs.task.new(KILL_BIN, nil, {"-TERM", tostring(pid)}):start()
     end
     ffmpegTask = nil
   elseif onDone then
