@@ -116,7 +116,7 @@ mic.buildMicMenu()     -- builds menu items for hs.menubar:setMenu(); rescans on
 ### Failure modes
 
 - **No audio devices found** → menu shows a disabled "no audio devices found" line. Recording falls back to `:0` and likely produces a zero-byte WAV → empty transcript → notify path.
-- **ffmpeg not at `/opt/homebrew/bin/ffmpeg`** → scan returns empty; same handling as above. The path is hardcoded because Hammerspoon launches from launchd with a minimal `PATH`.
+- **ffmpeg binary missing or moved** → scan returns empty; same handling as above. The path is resolved at install time by `install.sh` (via `command -v ffmpeg`) and written into `voice-dictate-config.lua` as `ffmpeg_path`; both this module and [voice-dictate-stream.lua](voice-dictate-stream.lua) read that key. If the Lua-side config predates the key, both modules fall back to probing `/opt/homebrew/bin/ffmpeg` and `/usr/local/bin/ffmpeg` and log a one-line warning suggesting a re-install.
 
 ### Size budget
 

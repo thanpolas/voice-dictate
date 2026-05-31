@@ -79,6 +79,43 @@ local onEmission = function(_line) end
 --- exit callback. Nil between sessions.
 local pendingOnDone = nil
 
+--- Absolute path to the ffmpeg binary, set by M.start from cfg.ffmpeg_path
+--- (install-time-resolved). Hammerspoon launches from launchd with a
+--- minimal PATH and cannot look up `ffmpeg` itself, and the Homebrew
+--- prefix differs between Apple Silicon and Intel — install.sh writes the
+--- resolved absolute path into voice-dictate-config.lua. Falls back to
+--- the common Homebrew locations when cfg is silent (older configs).
+local ffmpegPath = nil
+
+--- Test whether a filesystem path is readable. Used to probe the common
+--- ffmpeg locations when cfg.ffmpeg_path is missing.
+--- @param path string Absolute filesystem path.
+--- @return boolean True iff the path opens for reading.
+local function pathExists(path)
+  local f = io.open(path, "r")
+  if f then f:close(); return true end
+  return false
+end
+
+--- Pick an ffmpeg location: explicit cfg value wins, otherwise scan the
+--- two common Homebrew prefixes (Apple Silicon then Intel). Last-resort
+--- returns the Apple Silicon path so hs.task surfaces a clear "no such
+--- file" exit rather than the Lua module crashing on startup.
+--- @param fromCfg string|nil Value from cfg.ffmpeg_path, may be nil.
+--- @return string Absolute ffmpeg path to use for this session.
+local function resolveFfmpegPath(fromCfg)
+  if fromCfg and fromCfg ~= "" and pathExists(fromCfg) then return fromCfg end
+  for _, p in ipairs({"/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"}) do
+    if pathExists(p) then
+      print(string.format(
+        "[vd-stream] ffmpeg_path not in config; falling back to %s — re-run ./install.sh to lock it in",
+        p))
+      return p
+    end
+  end
+  return "/opt/homebrew/bin/ffmpeg"
+end
+
 -- ───── poll cycle ───────────────────────────────────────────────────────────
 
 --- POST the snapshot WAV to whisper-server and dispatch the parsed transcript.
@@ -133,7 +170,7 @@ end
 ---                            tearing down state (e.g. splice.stopSession).
 local function finalizeAndEmit(onDone)
   print("[vd-stream] finalize: begin")
-  hs.task.new("/opt/homebrew/bin/ffmpeg",
+  hs.task.new(ffmpegPath,
     function(exit, _stdout, _stderr)
       if exit ~= 0 then
         print(string.format("[vd-stream] finalize: snapshot exit=%d", exit))
@@ -182,7 +219,7 @@ local function snapshotAndPost()
     return
   end
   pollInFlight = true
-  local task = hs.task.new("/opt/homebrew/bin/ffmpeg",
+  local task = hs.task.new(ffmpegPath,
     function(exit, _stdout, _stderr)
       if exit ~= 0 then
         print(string.format("[vd-stream] skip: snapshot exit=%d", exit))
@@ -216,6 +253,7 @@ function M.start(cfg)
   print("[vd-stream] start: begin")
   local streamSh = (cfg and cfg.stream_sh) or DEFAULT_STREAM_SH
   local serverSh = (cfg and cfg.server_sh) or DEFAULT_SERVER_SH
+  ffmpegPath = resolveFfmpegPath(cfg and cfg.ffmpeg_path)
   os.remove(SESSION_WAV)
   lastDispatchedText = ""
   pollInFlight = false

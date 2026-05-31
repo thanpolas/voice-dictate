@@ -36,12 +36,18 @@ EOF
 # Write the Lua-side config file loaded by the Hammerspoon module on every reload.
 # The file lives outside the repo so user edits survive a clean re-clone.
 # stream_sh and server_sh are derived from dictate_sh — they always live in
-# the same bin/ dir.
+# the same bin/ dir. ffmpeg_path is resolved at install time because Hammer-
+# spoon launches from launchd with a minimal PATH and cannot look up the
+# binary itself; the Homebrew prefix differs between Apple Silicon (/opt/
+# homebrew) and Intel (/usr/local), so a literal in the Lua module would
+# silently break the install on the other architecture.
 # $1 — destination path (typically ~/.hammerspoon/voice-dictate-config.lua).
 # $2 — absolute path to bin/dictate.sh that the Lua module will invoke.
+# $3 — absolute path to the ffmpeg binary discovered at install time.
 function write_lua_config() {
   local destination="${1}"
   local dictate_sh="${2}"
+  local ffmpeg_path="${3}"
   local bin_dir="${dictate_sh%/*}"
   mkdir -p "$(dirname "${destination}")"
   cat > "${destination}" <<EOF
@@ -52,6 +58,7 @@ return {
   dictate_sh = "${dictate_sh}",
   stream_sh = "${bin_dir}/stream.sh",
   server_sh = "${bin_dir}/stream-server.sh",
+  ffmpeg_path = "${ffmpeg_path}",
   toggle_mods = {"cmd", "shift"},
   toggle_key = "D",
   right_alt_keycode = 61,

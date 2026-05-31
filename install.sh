@@ -107,14 +107,26 @@ function cmd_install() {
   local resolved_model
   resolved_model="$(ensure_model "${cfg_model}" "${VD_LOCAL_MODELS_DIR}/${VD_DEFAULT_MODEL_FILENAME}")"
 
+  # Resolve the ffmpeg binary now so the Lua config carries an absolute path.
+  # Hammerspoon launches from launchd with a minimal PATH and cannot look up
+  # `ffmpeg` itself; embedding the resolved path here keeps the streaming
+  # pipeline portable across Apple Silicon (/opt/homebrew) and Intel
+  # (/usr/local) without literals in the Lua module.
+  local ffmpeg_path
+  ffmpeg_path="$(command -v ffmpeg)"
+  if [[ -z "${ffmpeg_path}" ]]; then
+    log error "ffmpeg not found on PATH after dependency setup; cannot continue"
+    exit 1
+  fi
+
   write_shell_config "${VD_SHELL_CONFIG}" "${resolved_model}" "${cfg_language}"
-  write_lua_config "${VD_LUA_CONFIG}" "${REPO_ROOT}/bin/dictate.sh"
+  write_lua_config "${VD_LUA_CONFIG}" "${REPO_ROOT}/bin/dictate.sh" "${ffmpeg_path}"
   link_modules "${VD_SRC_LUA_DIR}" "${VD_HAMMERSPOON_DIR}"
   patch_init_lua "${VD_INIT_LUA}"
   reload_hammerspoon
 
   echo
-  log ok "voice-dictate installed. Hotkeys: Right Option (PTT), Cmd+Shift+D (toggle), Cmd+Shift+S (streaming)."
+  log ok "voice-dictate installed. Hotkeys: Right Option (PTT), Cmd+Shift+D (toggle)"
   log info "macOS will prompt for Accessibility, Input Monitoring, and Microphone on first use — grant each when asked."
 }
 
