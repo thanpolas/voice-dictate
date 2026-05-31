@@ -1,6 +1,6 @@
 # bin — shell side
 
-`dictate.sh` is the single-shot record/transcribe entry point — kept for ad-hoc shell use; no hotkey reaches it any more. `stream.sh` and `stream-server.sh` together drive the live-streaming pipeline that the Hammerspoon hotkeys now invoke (see [the ffmpeg-streaming-rebuild plan](../engineering/plans/2026-05-28-ffmpeg-streaming-rebuild.md)): `stream.sh record` keeps an `ffmpeg` AVFoundation capture writing to a session WAV; `stream-server.sh` keeps a `whisper-server` daemon loaded so per-tick inference pays no model-load tax; the Lua side polls every ~2s and POSTs a finalised snapshot of the WAV to the daemon. Three more sibling scripts provide automated tests and a process watchdog — they are not in the runtime path.
+`dictate.sh` is the single-shot record/transcribe entry point — kept for ad-hoc shell use; no hotkey reaches it any more. `stream.sh` and `stream-server.sh` together drive the live-streaming pipeline that the Hammerspoon hotkeys now invoke (see [the ffmpeg-streaming-rebuild plan](../engineering/plans/2026-05-28-ffmpeg-streaming-rebuild.md)): `stream.sh record` keeps an `ffmpeg` AVFoundation capture writing to a session WAV; `stream-server.sh` keeps a `whisper-server` daemon loaded so per-tick inference pays no model-load tax; the Lua side polls every ~2s and POSTs a finalised snapshot of the WAV to the daemon. `stream-whisper.sh` is the **experimental** alternative engine — a `whisper-stream` (SDL2) recorder selected only when the menubar Engine choice opts in (see [the pluggable-engines plan](../engineering/plans/2026-05-31-pluggable-streaming-engines.md)). Three more sibling scripts provide automated tests and a process watchdog — they are not in the runtime path.
 
 ## [dictate.sh](dictate.sh)
 
@@ -95,6 +95,35 @@ The streaming inference daemon — `whisper-server` loaded once with the configu
 ### Size budget
 
 Soft cap 200 lines, currently ~170. Split triggers: a streaming `/inference` long-poll mode, or a second daemon (e.g. an LLM cleanup pass) that warrants its own lifecycle helper.
+
+## [stream-whisper.sh](stream-whisper.sh)
+
+```
+stream-whisper.sh stream [capture-id]   capture via SDL2; emit transcription windows on stdout until SIGTERM
+```
+
+**Experimental.** The opt-in alternative to the `stream.sh` + `stream-server.sh` engine, consumed by [voice-dictate-stream-whisper.lua](../hammerspoon/voice-dictate-stream-whisper.lua). One long-lived `whisper-stream` process emits a revisable transcript of the rolling window every `STREAM_STEP_MS`; `exec` replaces the shell so SIGTERM reaches the binary directly (SDL2 cleans up on exit, no WAV trailer).
+
+### Why experimental
+
+`whisper-stream` captures through SDL2's CoreAudio path, which **bypasses macOS's Voice Processing IO unit** (AGC / noise-suppression / echo-cancel). On mics that need that DSP the transcript hallucinates — the exact problem that drove the [ffmpeg rebuild](../engineering/plans/2026-05-28-ffmpeg-streaming-rebuild.md). This engine exists for setups where SDL2 capture is acceptable, gated behind the menubar warning.
+
+### Configurable values
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `MODEL_PATH` | from `config.local.sh` | Shared with [dictate.sh](dictate.sh). |
+| `LANGUAGE` | from `config.local.sh` | Shared with [dictate.sh](dictate.sh). |
+| `THREADS` | from `config.local.sh` | Shared with [dictate.sh](dictate.sh). |
+| `STREAM_STEP_MS` | `500` | How often the rolling window is re-transcribed. Script-local default; env-overridable. |
+| `STREAM_LENGTH_MS` | `10000` | Length of the rolling audio window — context the model reconsiders each step. |
+| `STREAM_KEEP_MS` | `200` | Audio carried from the previous step for boundary continuity. |
+
+The SDL2 capture device is passed as the `stream` argument, **not** a config key — SDL2 numbering is independent of ffmpeg's `AUDIO_DEVICE` avfoundation index. The device is chosen in the menubar `Settings ▸ SDL2 capture device` picker (fixed integer ids, `-1` default), read per session by [voice-dictate-stream-whisper.lua](../hammerspoon/voice-dictate-stream-whisper.lua).
+
+### Size budget
+
+Soft cap 200 lines, currently ~115. Split triggers: a second subcommand, or a non-SDL2 capture backend for the experimental engine.
 
 ## [test-record-shutdown.sh](test-record-shutdown.sh)
 
