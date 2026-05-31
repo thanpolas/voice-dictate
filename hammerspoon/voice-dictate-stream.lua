@@ -29,6 +29,13 @@
 
 local M = {}
 
+--- Mic picker — owns the avfoundation device selection. The user's choice is
+--- persisted in hs.settings (NSUserDefaults) and is the source of truth for
+--- which input ffmpeg should record from. Reading it at session start (not
+--- module load) means the menu pick takes effect on the next PTT without a
+--- Hammerspoon reload.
+local mic = require("voice-dictate-mic")
+
 -- ───── constants ────────────────────────────────────────────────────────────
 
 --- Repo-derived path to bin/stream.sh (record) and bin/stream-server.sh
@@ -254,6 +261,13 @@ function M.start(cfg)
   local streamSh = (cfg and cfg.stream_sh) or DEFAULT_STREAM_SH
   local serverSh = (cfg and cfg.server_sh) or DEFAULT_SERVER_SH
   ffmpegPath = resolveFfmpegPath(cfg and cfg.ffmpeg_path)
+  -- The mic picker is the source of truth for which input ffmpeg records
+  -- from. Read at session start (not module load) so menu changes take
+  -- effect on the next PTT without hs.reload(). Pass as the 2nd
+  -- positional arg to stream.sh's `record` subcommand, which accepts
+  -- `record <wav-path> [device]`.
+  local audioDevice = mic.loadAudioDevice()
+  print(string.format("[vd-stream] start: audio_device=%s", audioDevice))
   os.remove(SESSION_WAV)
   lastDispatchedText = ""
   pollInFlight = false
@@ -275,7 +289,7 @@ function M.start(cfg)
       pendingOnDone = nil
       finalizeAndEmit(cb)
     end,
-    {"record", SESSION_WAV})
+    {"record", SESSION_WAV, audioDevice})
   ffmpegTask:start()
   pollTimer = hs.timer.doEvery(POLL_INTERVAL_S, snapshotAndPost)
   isStreaming = true
