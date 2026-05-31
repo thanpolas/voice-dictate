@@ -5,11 +5,14 @@ Lua files loaded via the user's `~/.hammerspoon/init.lua` (which requires the ma
 - [voice-dictate.lua](voice-dictate.lua) — main entry. Hotkeys, state machine, single-shot recording, paste.
 - [voice-dictate-menu.lua](voice-dictate-menu.lua) — menubar command center: the idle icon, the dropdown, the recording title, the spinner.
 - [voice-dictate-mic.lua](voice-dictate-mic.lua) — mic picker. Scans avfoundation inputs, persists choice via `hs.settings`, builds the Microphone submenu.
-- [voice-dictate-stream.lua](voice-dictate-stream.lua) — streaming pipeline orchestrator: spawns `bin/stream.sh` + `bin/stream-server.sh`, runs an `hs.timer` every ~2s to POST a WAV snapshot and dispatch the JSON transcript to the registered emission handler. Stateless splice-wise; pairs with voice-dictate-splice.lua.
+- [voice-dictate-settings.lua](voice-dictate-settings.lua) — schema-driven `hs.settings` store. Owns the engine choice and the "Settings ▸" submenu; future knobs are schema rows.
+- [voice-dictate-stream.lua](voice-dictate-stream.lua) — stable streaming engine: spawns `bin/stream.sh` + `bin/stream-server.sh`, runs an `hs.timer` every ~2s to POST a WAV snapshot and dispatch the JSON transcript to the registered emission handler. Stateless splice-wise; pairs with voice-dictate-splice.lua.
+- [voice-dictate-stream-whisper.lua](voice-dictate-stream-whisper.lua) — experimental streaming engine. Spawns `bin/stream-whisper.sh`, consumes its stdout windows, reconstructs the full transcript via voice-dictate-whisper-merge, dispatches it. Same contract as voice-dictate-stream.
+- [voice-dictate-whisper-merge.lua](voice-dictate-whisper-merge.lua) — pure rolling-window → full-transcript merge adapter for the whisper engine. Append-only overlap reconstruction; no `hs.*` dependency.
 - [voice-dictate-splice.lua](voice-dictate-splice.lua) — clipboard-mediated splice paste layer. Per-emission `Shift+Cmd+Up` / `Cmd+X` / modify / `Cmd+V` with D3 divergence skip, D4 clipboard preservation, D6 focus-loss stop.
-- [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua) — session orchestrator. Composes voice-dictate-stream (pipeline) + voice-dictate-splice (paste) into start/stop calls driven by the main module's hotkeys.
+- [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua) — session orchestrator. Selects the engine from settings, then composes it with voice-dictate-splice (paste) into start/stop calls driven by the main module's hotkeys.
 
-All six files must live in `~/.hammerspoon/` so Lua's `require()` can resolve the siblings — `install.sh` symlinks every `hammerspoon/*.lua`.
+All nine files must live in `~/.hammerspoon/` so Lua's `require()` can resolve the siblings — `install.sh` symlinks every `hammerspoon/*.lua`.
 
 ## [voice-dictate.lua](voice-dictate.lua)
 
@@ -78,10 +81,12 @@ The menubar command center — the single control surface. `M.start()` hides Ham
 
 ```
 Dikta — Idle / Streaming…   (status header, disabled)
+⚠ experimental engine active (only while whisper-stream is the selection)
 ────────────
 Start / Stop Dictation       ⌘⇧D
 ────────────
-Microphone ▸                 (live-rescan mic picker submenu)
+Microphone ▸                 (mic picker; dimmed when whisper-stream selected)
+Settings ▸                   (Engine; + SDL2 capture when whisper-stream selected)
 ────────────
 Open Console                 → hs.openConsole()
 Reload Config                → hs.reload()
@@ -89,7 +94,7 @@ Reload Config                → hs.reload()
 Show Hammerspoon Menu Icon   → hs.menuIcon(true)
 ```
 
-Registered as a callback, so it re-reads streaming state and re-scans mics on every open. Driven by a control table injected from the main module (`onToggle`, `isStreaming`, `onOpenConsole`, `onReload`, `onShowHsIcon`, `hotkeyHint`, `hideHsIcon`) — no circular `require` back into the main module.
+Registered as a callback, so it re-reads streaming state, re-scans mics, and re-reads settings on every open. Driven by a control table injected from the main module (`onToggle`, `isStreaming`, `onOpenConsole`, `onReload`, `onShowHsIcon`, `hotkeyHint`, `hideHsIcon`) — no circular `require` back into the main module. The "Settings ▸" submenu and the experimental-warning line are owned by [voice-dictate-settings.lua](voice-dictate-settings.lua), not the control table.
 
 ### Menubar states
 
@@ -99,6 +104,22 @@ Registered as a callback, so it re-reads streaming state and re-scans mics on ev
 ### Hiding Hammerspoon's icon — recovery path
 
 Hiding Hammerspoon's menu icon removes the usual access to its Console and Preferences. The dropdown's **Show Hammerspoon Menu Icon** restores it for the session, but `hs.reload()` re-hides it (the icon is re-asserted on every `M.start()`). To keep it permanently, set `hide_hammerspoon_icon = false` in `voice-dictate-config.lua`. If the module ever mounts but its own item disappears, re-enable the icon from Hammerspoon's Preferences (Spotlight → Hammerspoon) or run `hs.menuIcon(true)` in the Console.
+
+## [voice-dictate-settings.lua](voice-dictate-settings.lua)
+
+Schema-driven `hs.settings` store — the generalisation of the persistence pattern [voice-dictate-mic.lua](voice-dictate-mic.lua) uses. Each setting is one `SCHEMA` row declaring its NSUserDefaults key, label, default, `choices` + display `choice_labels`, and an optional `visible_when` predicate. It holds two rows: `engine` (the streaming-engine choice) and `sdl2_capture_id` (the SDL2 device for the whisper engine, shown only when that engine is selected).
+
+### Adding a knob
+
+Add a `SCHEMA` row and append its name to `MENU_ORDER` — both in this file. The dropdown renders the new enum as a checked-radio submenu automatically; **no edit to [voice-dictate-menu.lua](voice-dictate-menu.lua) is required.** A row with a `visible_when` predicate is shown only when it returns true (the SDL2 device gates on the engine choice this way). This is the whole point of the substrate.
+
+### Engine choice and the experimental warning
+
+`M.ENGINE.{FFMPEG_SERVER, WHISPER_STREAM}` are the persisted engine identifiers; consumers compare against them rather than bare strings. `ffmpeg-server` is the default. `whisper-stream` is opt-in and experimental — selecting it inserts the `⚠ experimental engine active` line into the dropdown header, reveals the **SDL2 capture device** picker, and dims the avfoundation **Microphone** item (which does not apply to SDL2 capture). The choice is read at session start (not module load), so it takes effect on the next dictation without `hs.reload()`, exactly like the mic picker.
+
+### The SDL2 capture picker
+
+`whisper-stream` exposes no device enumeration, and any spawn pays the full Metal-backend load (~11s), so a live device probe on a menu click is infeasible. The picker therefore offers a fixed list of integer capture ids (`Default (-1)`, `0`–`4`) — pick by trial. SDL2 numbering is independent of ffmpeg's avfoundation index, which is why the Microphone picker cannot drive this engine.
 
 ## [voice-dictate-mic.lua](voice-dictate-mic.lua)
 
@@ -128,13 +149,14 @@ mic.buildMicMenu()     -- builds menu items for hs.menubar:setMenu(); rescans on
 
 CLAUDE.md's 200 soft / 300 hard line cap applies per file. The command-center extraction moved all menubar presentation out of the main module into [voice-dictate-menu.lua](voice-dictate-menu.lua), keeping each module under the cap. The opt-in streaming mode lives in its own sibling [voice-dictate-stream.lua](voice-dictate-stream.lua) for the same reason. Future split triggers: an on-pointer cursor loader or cursor-lock async paste would each justify another sibling.
 
-## Streaming mode — voice-dictate-stream-mode.lua, voice-dictate-stream.lua, voice-dictate-splice.lua
+## Streaming mode — the engine abstraction, the splice, the orchestrator
 
-Three siblings cooperate to deliver the streaming pipeline that the PTT and toggle hotkeys both drive.
+Streaming is a **selectable engine** plus a shared paste layer, composed by the orchestrator that the PTT and toggle hotkeys drive. An *engine* is anything satisfying the contract `setEmissionHandler(fn)` / `start(cfg)` / `stop(onDone)` / `isStreaming()`, where every emission is the **full transcript so far** (so the splice's substring-replace works unchanged). Two engines ship:
 
-- [voice-dictate-stream.lua](voice-dictate-stream.lua) — pipeline orchestrator. Spawns `bin/stream-server.sh start` (whisper-server daemon) and `bin/stream.sh record` (long-running ffmpeg) via `hs.task`, then runs an `hs.timer` every ~2s that finalises an ffmpeg snapshot of the in-progress session WAV, POSTs the snapshot to the daemon's `/inference` endpoint, parses the JSON, and dispatches the full transcript as a single emission. Knows nothing about pasting.
-- [voice-dictate-splice.lua](voice-dictate-splice.lua) — the splice paste layer. Owns the per-emission keystroke chain, the D3 divergence skip, the D4 clipboard snapshot/restore, and the D6 focus-loss subscription.
-- [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua) — session orchestrator. On `startSession`, starts the splice session, registers `splice.applyEmission` as the stream's emission handler, and starts the pipeline. On `stopSession` (second hotkey tap, or focus loss), unwinds in reverse.
+- [voice-dictate-stream.lua](voice-dictate-stream.lua) — **stable engine (default).** Spawns `bin/stream-server.sh start` (whisper-server daemon) and `bin/stream.sh record` (long-running ffmpeg) via `hs.task`, then runs an `hs.timer` every ~2s that finalises an ffmpeg snapshot of the in-progress session WAV, POSTs it to the daemon's `/inference` endpoint, and dispatches the full transcript. ffmpeg AVFoundation capture runs Apple's Voice Processing DSP.
+- [voice-dictate-stream-whisper.lua](voice-dictate-stream-whisper.lua) — **experimental engine (opt-in).** Spawns `bin/stream-whisper.sh` (whisper-stream, SDL2 capture), consumes its rolling stdout windows, and reconstructs the full transcript via [voice-dictate-whisper-merge.lua](voice-dictate-whisper-merge.lua) before dispatching. SDL2 bypasses the Voice Processing DSP — hence experimental; see the [pluggable-engines plan](../engineering/plans/2026-05-31-pluggable-streaming-engines.md).
+- [voice-dictate-splice.lua](voice-dictate-splice.lua) — the splice paste layer, shared by both engines. Owns the per-emission keystroke chain, the D3 divergence skip, the D4 clipboard snapshot/restore, and the D6 focus-loss subscription.
+- [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua) — session orchestrator. On `startSession` it reads the engine choice from [voice-dictate-settings.lua](voice-dictate-settings.lua), starts the splice, registers `splice.applyEmission` as the engine's handler, and starts the engine. On `stopSession` (second hotkey tap, keystroke, or focus loss), it unwinds in reverse. The choice is read per session, so a menu change applies on the next dictation without `hs.reload()`.
 
 ### State machine
 
@@ -145,7 +167,7 @@ IDLE ──Cmd+Shift+D tap──► STREAMING ──Cmd+Shift+D tap────�
                               └─ focus loss / app exit ──────┴─► IDLE (clipboard restored)
 ```
 
-`STREAMING` means the whisper-server daemon and ffmpeg recorder are alive, the timer is polling, and the splice layer is subscribed to the resulting emissions. There is no separate "transcribing" state — emissions arrive every poll tick and paste live.
+`STREAMING` means the selected engine's processes are alive (ffmpeg + whisper-server, or whisper-stream) and the splice layer is subscribed to the resulting emissions. There is no separate "transcribing" state — emissions arrive continuously and paste live.
 
 ### The splice cycle
 

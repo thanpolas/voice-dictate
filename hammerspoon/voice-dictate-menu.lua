@@ -24,6 +24,10 @@ local M = {}
 --- Mic picker — scan / persist / menu. Embedded as the Microphone submenu.
 local mic = require("voice-dictate-mic")
 
+--- Settings store — schema-driven hs.settings wrapper. Owns the "Settings ▸"
+--- submenu and the engine selection the experimental-warning line reflects.
+local settings = require("voice-dictate-settings")
+
 -- ───── constants ──────────────────────────────────────────────────────────────
 
 --- The three menubar states. "idle" shows the Dikta mark icon; "streaming"
@@ -50,6 +54,11 @@ local FINALIZING_FRAME_INTERVAL_S = 0.1
 
 --- Text glyph fallback when the canvas idle icon cannot be rendered.
 local TITLE_IDLE_FALLBACK = "○"
+
+--- Dropdown header line shown while the experimental whisper-stream engine is
+--- the active selection — a standing reminder that the chosen engine bypasses
+--- Apple's voice DSP and may transcribe poorly on some mics.
+local EXPERIMENTAL_WARNING = "⚠ experimental engine active"
 
 -- ───── module state ───────────────────────────────────────────────────────────
 
@@ -166,27 +175,39 @@ local function statusText()
   return "Idle"
 end
 
---- Build the dropdown contents. Registered as a callback so it re-reads state
---- and re-scans mics on every open. Surfaces the two Hammerspoon functions the
---- hidden HS icon would otherwise provide (console, reload) plus an icon-restore.
+--- Build the dropdown contents. Registered as a callback so it re-reads state,
+--- re-scans mics, and re-reads settings on every open. Surfaces the two
+--- Hammerspoon functions the hidden HS icon would otherwise provide (console,
+--- reload) plus an icon-restore, and a "Settings ▸" submenu owning the engine
+--- choice and future knobs. A warning line is inserted while the experimental
+--- engine is the active selection.
 --- @return table Menu descriptors for hs.menubar:setMenu().
 local function buildMenu()
   local toggleLabel = (state ~= STATE_IDLE and "Stop Dictation" or "Start Dictation")
   if ctl.hotkeyHint and ctl.hotkeyHint ~= "" then
     toggleLabel = toggleLabel .. "   " .. ctl.hotkeyHint
   end
-  return {
-    {title = "Dikta — " .. statusText(), disabled = true},
-    {title = "-"},
-    {title = toggleLabel, fn = function() ctl.onToggle() end},
-    {title = "-"},
-    {title = "Microphone", menu = mic.buildMicMenu()},
-    {title = "-"},
-    {title = "Open Console", fn = function() ctl.onOpenConsole() end},
-    {title = "Reload Config", fn = function() ctl.onReload() end},
-    {title = "-"},
-    {title = "Show Hammerspoon Menu Icon", fn = function() ctl.onShowHsIcon() end},
-  }
+  local items = {{title = "Dikta — " .. statusText(), disabled = true}}
+  if settings.get(settings.SETTING.ENGINE) == settings.ENGINE.WHISPER_STREAM then
+    table.insert(items, {title = EXPERIMENTAL_WARNING, disabled = true})
+  end
+  table.insert(items, {title = "-"})
+  table.insert(items, {title = toggleLabel, fn = function() ctl.onToggle() end})
+  table.insert(items, {title = "-"})
+  if settings.get(settings.SETTING.ENGINE) == settings.ENGINE.WHISPER_STREAM then
+    -- The avfoundation Microphone picker does not apply to SDL2 capture; the
+    -- SDL2 device lives under Settings ▸ instead. Dim it to say so.
+    table.insert(items, {title = "Microphone — n/a (SDL2 engine)", disabled = true})
+  else
+    table.insert(items, {title = "Microphone", menu = mic.buildMicMenu()})
+  end
+  table.insert(items, {title = "Settings", menu = settings.buildSettingsMenu()})
+  table.insert(items, {title = "-"})
+  table.insert(items, {title = "Open Console", fn = function() ctl.onOpenConsole() end})
+  table.insert(items, {title = "Reload Config", fn = function() ctl.onReload() end})
+  table.insert(items, {title = "-"})
+  table.insert(items, {title = "Show Hammerspoon Menu Icon", fn = function() ctl.onShowHsIcon() end})
+  return items
 end
 
 -- ───── lifecycle ───────────────────────────────────────────────────────────────

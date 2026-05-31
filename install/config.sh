@@ -35,8 +35,8 @@ EOF
 
 # Write the Lua-side config file loaded by the Hammerspoon module on every reload.
 # The file lives outside the repo so user edits survive a clean re-clone.
-# stream_sh and server_sh are derived from dictate_sh — they always live in
-# the same bin/ dir. ffmpeg_path is resolved at install time because Hammer-
+# stream_sh, server_sh, and stream_whisper_sh are derived from dictate_sh —
+# they always live in the same bin/ dir. ffmpeg_path is resolved at install time because Hammer-
 # spoon launches from launchd with a minimal PATH and cannot look up the
 # binary itself; the Homebrew prefix differs between Apple Silicon (/opt/
 # homebrew) and Intel (/usr/local), so a literal in the Lua module would
@@ -58,6 +58,7 @@ return {
   dictate_sh = "${dictate_sh}",
   stream_sh = "${bin_dir}/stream.sh",
   server_sh = "${bin_dir}/stream-server.sh",
+  stream_whisper_sh = "${bin_dir}/stream-whisper.sh",
   ffmpeg_path = "${ffmpeg_path}",
   toggle_mods = {"cmd", "shift"},
   toggle_key = "D",
