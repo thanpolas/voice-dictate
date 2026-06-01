@@ -1,10 +1,10 @@
---- @fileoverview Streaming session orchestrator — composes voice-dictate-stream
---- (stdout consumer) with voice-dictate-splice (paste layer) into a single
+--- @fileoverview Streaming session orchestrator — composes dikta-stream
+--- (stdout consumer) with dikta-splice (paste layer) into a single
 --- session API. Owns no hotkeys of its own; the main module's existing PTT and
 --- toggle handlers call into M.startSession/M.stopSession directly.
 ---
 --- Public API:
----   M.init()              Wire focus-loss self-stop. Call once from voice-dictate.lua's M.start().
+---   M.init()              Wire focus-loss self-stop. Call once from dikta.lua's M.start().
 ---   M.startSession(cfg)   Boot the pipeline + start the splice. Idempotent.
 ---   M.stopSession()       Tear down the splice + the pipeline. Safe to repeat.
 ---   M.isActive()          True iff a session is currently running.
@@ -14,10 +14,10 @@ local M = {}
 --- Streaming pipeline orchestrator — owns the ffmpeg recorder, the
 --- whisper-server daemon, and the polling timer that dispatches each
 --- inference response as an emission.
-local stream = require("voice-dictate-stream")
+local stream = require("dikta-stream")
 
 --- Per-emission paste mechanic — owns the clipboard splice + focus stop.
-local splice = require("voice-dictate-splice")
+local splice = require("dikta-splice")
 
 -- ───── public API ───────────────────────────────────────────────────────────
 

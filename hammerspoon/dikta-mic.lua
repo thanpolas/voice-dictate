@@ -1,7 +1,7 @@
 --- @fileoverview Mic picker — enumerate avfoundation audio inputs, persist
 --- the user's choice, build the menubar dropdown.
 ---
---- Required by voice-dictate.lua. Selection is stored in NSUserDefaults
+--- Required by dikta.lua. Selection is stored in NSUserDefaults
 --- (hs.settings) so it survives reloads and reboots. The scan runs on every
 --- menubar open so plug/unplug of USB or Bluetooth devices is reflected live.
 ---
@@ -15,7 +15,7 @@ local M = {}
 --- install time and writes it as cfg.ffmpeg_path. Required because hs.execute
 --- inherits Hammerspoon's minimal launchd PATH and the Homebrew prefix differs
 --- between Apple Silicon (/opt/homebrew) and Intel (/usr/local).
-local cfg = require("voice-dictate-config")
+local cfg = require("dikta-config")
 
 -- ───── constants ────────────────────────────────────────────────────────────
 

@@ -11,7 +11,7 @@
 ---      parses the JSON, and dispatches the full transcript as a single
 ---      emission to the caller-registered handler.
 ---
---- The handler downstream is voice-dictate-splice.lua. Because each transcript
+--- The handler downstream is dikta-splice.lua. Because each transcript
 --- is the model's reading of the *entire* session WAV up to that tick, the
 --- splice's substring-replace mechanic naturally handles revisions: prior
 --- transcript is the anchor in the field, new transcript replaces it.
@@ -34,16 +34,16 @@ local M = {}
 --- which input ffmpeg should record from. Reading it at session start (not
 --- module load) means the menu pick takes effect on the next PTT without a
 --- Hammerspoon reload.
-local mic = require("voice-dictate-mic")
+local mic = require("dikta-mic")
 
 -- ───── constants ────────────────────────────────────────────────────────────
 
 --- Repo-derived path to bin/stream.sh (record) and bin/stream-server.sh
 --- (start/stop). The streaming-mode caller's cfg overrides these if set.
 local DEFAULT_STREAM_SH = os.getenv("HOME") ..
-  "/Projects/myStash/voice-dictate/bin/stream.sh"
+  "/Projects/myStash/dikta/bin/stream.sh"
 local DEFAULT_SERVER_SH = os.getenv("HOME") ..
-  "/Projects/myStash/voice-dictate/bin/stream-server.sh"
+  "/Projects/myStash/dikta/bin/stream-server.sh"
 
 --- HTTP endpoint the daemon serves. Port matches stream-server.sh's default.
 local SERVER_URL = "http://127.0.0.1:8472/inference"
@@ -99,7 +99,7 @@ local pendingOnDone = nil
 --- (install-time-resolved). Hammerspoon launches from launchd with a
 --- minimal PATH and cannot look up `ffmpeg` itself, and the Homebrew
 --- prefix differs between Apple Silicon and Intel — install.sh writes the
---- resolved absolute path into voice-dictate-config.lua. Falls back to
+--- resolved absolute path into dikta-config.lua. Falls back to
 --- the common Homebrew locations when cfg is silent (older configs).
 local ffmpegPath = nil
 
@@ -252,7 +252,7 @@ end
 -- ───── lifecycle ────────────────────────────────────────────────────────────
 
 --- Register the per-tick emission handler. Default is a no-op so the module
---- ships callable on its own; voice-dictate-stream-mode wires the splice.
+--- ships callable on its own; dikta-stream-mode wires the splice.
 function M.setEmissionHandler(fn)
   onEmission = fn or function(_line) end
 end

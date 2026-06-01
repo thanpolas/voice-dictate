@@ -23,12 +23,12 @@ readonly VD_HAMMERSPOON_DIR="${HOME}/.hammerspoon"
 # symlinked into the Hammerspoon dir, so new modules need no change here.
 readonly VD_SRC_LUA_DIR="${REPO_ROOT}/hammerspoon"
 
-# User's Hammerspoon entry point — patched to require the voice-dictate module.
+# User's Hammerspoon entry point — patched to require the Dikta module.
 readonly VD_INIT_LUA="${VD_HAMMERSPOON_DIR}/init.lua"
 
 # Runtime config files written by the installer; both required by the tool.
 readonly VD_SHELL_CONFIG="${REPO_ROOT}/bin/config.local.sh"
-readonly VD_LUA_CONFIG="${VD_HAMMERSPOON_DIR}/voice-dictate-config.lua"
+readonly VD_LUA_CONFIG="${VD_HAMMERSPOON_DIR}/dikta-config.lua"
 
 # Project-local artifact store; install.sh creates it on first run.
 readonly VD_LOCAL_MODELS_DIR="${REPO_ROOT}/.local/models"

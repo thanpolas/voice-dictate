@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @fileoverview Configuration file writers. Generates the shell-side runtime
 # config (bin/config.local.sh) sourced by dictate.sh and the Lua-side hotkey
-# config (~/.hammerspoon/voice-dictate-config.lua) loaded by the Hammerspoon
+# config (~/.hammerspoon/dikta-config.lua) loaded by the Hammerspoon
 # module. Uses the : "${VAR:=…}" override pattern so pre-set env values still
 # win over the persisted defaults.
 
@@ -41,7 +41,7 @@ EOF
 # binary itself; the Homebrew prefix differs between Apple Silicon (/opt/
 # homebrew) and Intel (/usr/local), so a literal in the Lua module would
 # silently break the install on the other architecture.
-# $1 — destination path (typically ~/.hammerspoon/voice-dictate-config.lua).
+# $1 — destination path (typically ~/.hammerspoon/dikta-config.lua).
 # $2 — absolute path to bin/dictate.sh that the Lua module will invoke.
 # $3 — absolute path to the ffmpeg binary discovered at install time.
 function write_lua_config() {

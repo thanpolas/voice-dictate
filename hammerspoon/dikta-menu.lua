@@ -22,7 +22,7 @@
 local M = {}
 
 --- Mic picker — scan / persist / menu. Embedded as the Microphone submenu.
-local mic = require("voice-dictate-mic")
+local mic = require("dikta-mic")
 
 -- ───── constants ──────────────────────────────────────────────────────────────
 

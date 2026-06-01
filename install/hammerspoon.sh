@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# @fileoverview Hammerspoon integration. Symlinks the voice-dictate Lua
+# @fileoverview Hammerspoon integration. Symlinks the Dikta Lua
 # modules into ~/.hammerspoon/ so the user's init.lua can require them,
 # appends the loader line on first install, and triggers an in-place reload
 # via the hammerspoon:// URL scheme so changes take effect without a manual
@@ -12,9 +12,9 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # Single line appended to init.lua; matched verbatim to keep patching idempotent.
-readonly VD_LOADER_LINE='require("voice-dictate").start()'
+readonly VD_LOADER_LINE='require("dikta").start()'
 
-# Symlink every voice-dictate Lua module into ~/.hammerspoon/.
+# Symlink every Dikta Lua module into ~/.hammerspoon/.
 # Force-overwrites prior symlinks so a repo move on disk fixes itself. All
 # modules land in one directory so Lua's require() resolves siblings via
 # package.path. Globs the repo's hammerspoon/ dir, so new modules need no
@@ -33,16 +33,16 @@ function link_modules() {
   done
 }
 
-# Append the require("voice-dictate").start() line to init.lua if absent.
+# Append the require("dikta").start() line to init.lua if absent.
 # Creates the file if it doesn't exist yet. A verbatim grep keeps re-runs idempotent.
 # $1 — absolute path to the user's ~/.hammerspoon/init.lua.
 function patch_init_lua() {
   local init_lua="${1}"
   if [[ -f "${init_lua}" ]] && grep -Fq "${VD_LOADER_LINE}" "${init_lua}"; then
-    log info "init.lua already requires voice-dictate — skipping patch"
+    log info "init.lua already requires Dikta — skipping patch"
     return 0
   fi
-  printf '\n-- voice-dictate (installed by voice-dictate/install.sh)\n%s\n' \
+  printf '\n-- dikta (installed by dikta/install.sh)\n%s\n' \
     "${VD_LOADER_LINE}" >> "${init_lua}"
   log ok "patched ${init_lua}"
 }

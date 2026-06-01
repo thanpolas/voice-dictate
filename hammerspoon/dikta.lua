@@ -1,14 +1,14 @@
 --- @fileoverview Hotkey-driven local dictation: PTT + toggle, ffmpeg + whisper-server backend.
 ---
 --- Owns the macOS-side behaviour — hotkeys, lifecycle, menubar — and delegates
---- the streaming pipeline to voice-dictate-stream-mode.lua. Right Option (held)
+--- the streaming pipeline to dikta-stream-mode.lua. Right Option (held)
 --- and the toggle hotkey both drive a streaming session: text appears in the
 --- focused field while the user keeps speaking, via the clipboard-mediated
 --- splice. The single-shot record-then-transcribe path that this module used
 --- to drive lives in bin/dictate.sh for ad-hoc shell use; no hotkey reaches
 --- it any more (see engineering/plans/2026-05-28-streaming-replaces-single-shot.md).
 ---
---- Runtime config is loaded from ~/.hammerspoon/voice-dictate-config.lua, which
+--- Runtime config is loaded from ~/.hammerspoon/dikta-config.lua, which
 --- install.sh generates. Edit that file and hs.reload() to change settings.
 ---
 --- Public API:
@@ -23,7 +23,7 @@ local M = {}
 --- toggle_mods, toggle_key, right_alt_keycode, stream_sh, server_sh, and
 --- the optional hide_hammerspoon_icon. dictate_sh is also present for
 --- ad-hoc shell use but no hotkey reaches it.
-local cfg = require("voice-dictate-config")
+local cfg = require("dikta-config")
 
 --- Modifier set for the toggle hotkey (tap to start, tap to stop).
 local TOGGLE_MODS = cfg.toggle_mods
@@ -40,12 +40,12 @@ local RIGHT_ALT_KEYCODE = cfg.right_alt_keycode
 local HIDE_HS_ICON = cfg.hide_hammerspoon_icon ~= false
 
 --- Menubar command center — icon, dropdown, streaming title.
---- See voice-dictate-menu.lua.
-local menu = require("voice-dictate-menu")
+--- See dikta-menu.lua.
+local menu = require("dikta-menu")
 
 --- Streaming-session orchestrator — composes the stdout consumer and the
---- splice paste layer. See voice-dictate-stream-mode.lua.
-local streamMode = require("voice-dictate-stream-mode")
+--- splice paste layer. See dikta-stream-mode.lua.
+local streamMode = require("dikta-stream-mode")
 
 -- ───── module state ─────────────────────────────────────────────────────────
 

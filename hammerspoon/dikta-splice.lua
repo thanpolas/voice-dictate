@@ -1,6 +1,6 @@
 --- @fileoverview Clipboard-mediated splice — paste each pipeline emission
 --- into the focused field via Shift+Cmd+Up / Cmd+X / modify clipboard / Cmd+V.
---- Sibling of voice-dictate-stream.lua: stream.lua dispatches each cleaned
+--- Sibling of dikta-stream.lua: stream.lua dispatches each cleaned
 --- transcript as an emission; this module turns emissions into paste cycles
 --- while preserving the user's clipboard across the session and stopping on
 --- focus loss.
@@ -202,7 +202,7 @@ function M.startSession(cfg)
   committedPrefix = ""
   lastPastedDictationText = ""
   -- Default to append-only when the caller does not explicitly set it.
-  -- The production caller (voice-dictate-stream-mode) always passes
+  -- The production caller (dikta-stream-mode) always passes
   -- append_only = false because the ffmpeg + whisper-server pipeline
   -- emits full revisions; append survives as a safer fallback for any
   -- caller whose emissions are not stable revisions.
