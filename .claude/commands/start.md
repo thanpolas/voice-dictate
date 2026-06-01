@@ -1,8 +1,8 @@
 ---
-description: Start a new voice-dictate session — load INVENTORY.md, engineering rules, and current product state
+description: Start a new Dikta session — load INVENTORY.md, engineering rules, and current product state
 ---
 
-You are starting a new voice-dictate session. Execute the following steps in order.
+You are starting a new Dikta session. Execute the following steps in order.
 
 ## Step 1 — Confirm CLAUDE.md is loaded
 

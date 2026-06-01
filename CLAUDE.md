@@ -1,4 +1,4 @@
-# voice-dictate — engineering entry point
+# Dikta — engineering entry point
 
 This file is loaded at every session start. It is the authoritative index for engineering rules; depth lives in [`engineering/`][engineering]. Read it first, then orient from [`INVENTORY.md`][inventory-md].
 
@@ -30,7 +30,7 @@ Switchboards exist at every level — root `INVENTORY.md` and any folder README 
 | **A1 — CDE** | Every meaningful folder has a README. Missing context is a blocker. | [`engineering/cde.md`][cde-md] |
 | **A2 — No inline literal values** | Paths, URLs, ports, settings keys, state labels — module-level constants or config values, never inline at call sites. Format strings and one-shot error text are mechanics, not values. | [`engineering/conventions.md`][conventions-md] |
 | **A3 — Refactor continuously** | 200-line soft cap, 300-line hard stop for source files. No deferred cleanup. | [`engineering/conventions.md`][conventions-md] |
-| **A4 — Smoke-test pure paths** | `dictate.sh transcribe` and any pure helper get smoke coverage. Audio I/O and Hammerspoon Lua are manually verified. | [`engineering/conventions.md`][conventions-md] |
+| **A4 — Smoke-test pure paths** | `dikta.sh transcribe` and any pure helper get smoke coverage. Audio I/O and Hammerspoon Lua are manually verified. | [`engineering/conventions.md`][conventions-md] |
 | **A8 — Spec → Plan → Implement** | No non-trivial implementation begins without a settled spec and a plan. | [`engineering/conventions.md`][conventions-md] |
 
 ## Dated plans

@@ -1,27 +1,27 @@
 # hammerspoon — Lua module
 
-Lua files loaded via the user's `~/.hammerspoon/init.lua` (which requires the main module). Own the macOS-side concerns: hotkeys, recording state, the menubar command center, paste, mic selection. Delegate audio capture and transcription to [bin/dictate.sh](../bin/dictate.sh) (single-shot) and [bin/stream.sh](../bin/stream.sh) (opt-in streaming).
+Lua files loaded via the user's `~/.hammerspoon/init.lua` (which requires the main module). Own the macOS-side concerns: hotkeys, recording state, the menubar command center, paste, mic selection. Delegate audio capture and transcription to [bin/dikta.sh](../bin/dikta.sh) (single-shot) and [bin/stream.sh](../bin/stream.sh) (opt-in streaming).
 
-- [voice-dictate.lua](voice-dictate.lua) — main entry. Hotkeys, state machine, single-shot recording, paste.
-- [voice-dictate-menu.lua](voice-dictate-menu.lua) — menubar command center: the idle icon, the dropdown, the recording title, the spinner.
-- [voice-dictate-mic.lua](voice-dictate-mic.lua) — mic picker. Scans avfoundation inputs, persists choice via `hs.settings`, builds the Microphone submenu.
-- [voice-dictate-stream.lua](voice-dictate-stream.lua) — streaming pipeline orchestrator: spawns `bin/stream.sh` + `bin/stream-server.sh`, runs an `hs.timer` every ~2s to POST a WAV snapshot and dispatch the JSON transcript to the registered emission handler. Stateless splice-wise; pairs with voice-dictate-splice.lua.
-- [voice-dictate-splice.lua](voice-dictate-splice.lua) — clipboard-mediated splice paste layer. Per-emission `Shift+Cmd+Up` / `Cmd+X` / modify / `Cmd+V` with D3 divergence skip, D4 clipboard preservation, D6 focus-loss stop.
-- [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua) — session orchestrator. Composes voice-dictate-stream (pipeline) + voice-dictate-splice (paste) into start/stop calls driven by the main module's hotkeys.
+- [dikta.lua](dikta.lua) — main entry. Hotkeys, state machine, single-shot recording, paste.
+- [dikta-menu.lua](dikta-menu.lua) — menubar command center: the idle icon, the dropdown, the recording title, the spinner.
+- [dikta-mic.lua](dikta-mic.lua) — mic picker. Scans avfoundation inputs, persists choice via `hs.settings`, builds the Microphone submenu.
+- [dikta-stream.lua](dikta-stream.lua) — streaming pipeline orchestrator: spawns `bin/stream.sh` + `bin/stream-server.sh`, runs an `hs.timer` every ~2s to POST a WAV snapshot and dispatch the JSON transcript to the registered emission handler. Stateless splice-wise; pairs with dikta-splice.lua.
+- [dikta-splice.lua](dikta-splice.lua) — clipboard-mediated splice paste layer. Per-emission `Shift+Cmd+Up` / `Cmd+X` / modify / `Cmd+V` with D3 divergence skip, D4 clipboard preservation, D6 focus-loss stop.
+- [dikta-stream-mode.lua](dikta-stream-mode.lua) — session orchestrator. Composes dikta-stream (pipeline) + dikta-splice (paste) into start/stop calls driven by the main module's hotkeys.
 
 All six files must live in `~/.hammerspoon/` so Lua's `require()` can resolve the siblings — `install.sh` symlinks every `hammerspoon/*.lua`.
 
-## [voice-dictate.lua](voice-dictate.lua)
+## [dikta.lua](dikta.lua)
 
 ### Public API
 
 ```lua
-local m = require("voice-dictate")
+local m = require("dikta")
 m.start()  -- bind hotkeys, mount the command center (idempotent — calls stop() first)
 m.stop()   -- tear down everything (safe to call repeatedly; used by hs.reload)
 ```
 
-The installer appends `require("voice-dictate").start()` to `init.lua`. Nothing else is needed.
+The installer appends `require("dikta").start()` to `init.lua`. Nothing else is needed.
 
 ### State machine
 
@@ -33,7 +33,7 @@ IDLE ──Cmd+Shift+D tap─► STREAMING ──Cmd+Shift+D tap─────�
                             └─ focus loss ─────────────────┴─► IDLE
 ```
 
-Session state lives in [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua); both hotkeys flip it via the same `startSession`/`stopSession` calls. Pressing the toggle while PTT-streaming (or vice versa) collapses to "stop": last hotkey wins. There is no separate "transcribing" state — emissions arrive continuously and paste live; release means stop.
+Session state lives in [dikta-stream-mode.lua](dikta-stream-mode.lua); both hotkeys flip it via the same `startSession`/`stopSession` calls. Pressing the toggle while PTT-streaming (or vice versa) collapses to "stop": last hotkey wins. There is no separate "transcribing" state — emissions arrive continuously and paste live; release means stop.
 
 Four triggers stop an active session, all "stop and keep" (the transcript pasted so far stays, the clipboard is restored): a second toggle tap, Right Option release, **any ordinary keystroke**, and focus loss. The keystroke trigger lets the user just start typing to take over — see [the keypress-stop plan](../engineering/plans/2026-05-31-keypress-stop.md). "Ordinary" means a `keyDown` carrying no Cmd/Ctrl/Alt; that same filter excludes the splice layer's own synthetic `Cmd+X` / `Cmd+V` / `Shift+Cmd+Up` keystrokes, so the session never self-cancels.
 
@@ -48,11 +48,11 @@ A third, always-on `keyDown` eventtap implements the keystroke-stop trigger (abo
 
 ### Configurable values
 
-Sourced from `~/.hammerspoon/voice-dictate-config.lua`, written by `install.sh`. Edit that file and run `hs.reload()` from the Hammerspoon Console to apply.
+Sourced from `~/.hammerspoon/dikta-config.lua`, written by `install.sh`. Edit that file and run `hs.reload()` from the Hammerspoon Console to apply.
 
 | Field | Default | Purpose |
 |-------|---------|---------|
-| `dictate_sh` | absolute path derived at install time | Single-shot shell entry point — kept for ad-hoc use; no hotkey reaches it. |
+| `dikta_sh` | absolute path derived at install time | Single-shot shell entry point — kept for ad-hoc use; no hotkey reaches it. |
 | `toggle_mods` | `{"cmd", "shift"}` | Modifiers for the toggle hotkey. |
 | `toggle_key` | `"D"` | Key paired with the toggle modifiers. |
 | `right_alt_keycode` | `61` | Filters the flagsChanged eventtap. Left Option is `58`. |
@@ -64,13 +64,13 @@ Sourced from `~/.hammerspoon/voice-dictate-config.lua`, written by `install.sh`.
 
 - **`stream.sh` or `stream-server.sh` exits non-zero** → log to the Hammerspoon Console, reset state to IDLE.
 - **Focus leaves the field mid-session** → D6 self-stop fires: tear down the pipeline, restore the clipboard snapshot, no further pastes. User re-triggers explicitly.
-- **`hs.task` start fails** → log error, state stays IDLE. Confirm `stream_sh` / `server_sh` in `voice-dictate-config.lua` are executable.
+- **`hs.task` start fails** → log error, state stays IDLE. Confirm `stream_sh` / `server_sh` in `dikta-config.lua` are executable.
 
 ### Reload safety
 
 `M.start()` calls `M.stop()` first, so `hs.reload()` is always safe. Eventtaps, hotkeys, menubar item, and any in-flight streaming task are all torn down before re-binding. No accumulation across reloads.
 
-## [voice-dictate-menu.lua](voice-dictate-menu.lua)
+## [dikta-menu.lua](dikta-menu.lua)
 
 The menubar command center — the single control surface. `M.start()` hides Hammerspoon's own menu icon (config key `hide_hammerspoon_icon`, default true), so this dropdown also surfaces the two Hammerspoon functions that icon would otherwise provide.
 
@@ -98,16 +98,16 @@ Registered as a callback, so it re-reads streaming state and re-scans mics on ev
 
 ### Hiding Hammerspoon's icon — recovery path
 
-Hiding Hammerspoon's menu icon removes the usual access to its Console and Preferences. The dropdown's **Show Hammerspoon Menu Icon** restores it for the session, but `hs.reload()` re-hides it (the icon is re-asserted on every `M.start()`). To keep it permanently, set `hide_hammerspoon_icon = false` in `voice-dictate-config.lua`. If the module ever mounts but its own item disappears, re-enable the icon from Hammerspoon's Preferences (Spotlight → Hammerspoon) or run `hs.menuIcon(true)` in the Console.
+Hiding Hammerspoon's menu icon removes the usual access to its Console and Preferences. The dropdown's **Show Hammerspoon Menu Icon** restores it for the session, but `hs.reload()` re-hides it (the icon is re-asserted on every `M.start()`). To keep it permanently, set `hide_hammerspoon_icon = false` in `dikta-config.lua`. If the module ever mounts but its own item disappears, re-enable the icon from Hammerspoon's Preferences (Spotlight → Hammerspoon) or run `hs.menuIcon(true)` in the Console.
 
-## [voice-dictate-mic.lua](voice-dictate-mic.lua)
+## [dikta-mic.lua](dikta-mic.lua)
 
 Sibling module owning the mic picker. `require`d by the main module; not loaded by `init.lua` directly.
 
 ### Public API
 
 ```lua
-local mic = require("voice-dictate-mic")
+local mic = require("dikta-mic")
 mic.loadAudioDevice()  -- returns ":N" — last-selected index, falls back to ":0"
 mic.buildMicMenu()     -- builds menu items for hs.menubar:setMenu(); rescans on each call
 ```
@@ -116,25 +116,25 @@ mic.buildMicMenu()     -- builds menu items for hs.menubar:setMenu(); rescans on
 
 - **Scan on every open.** `hs.menubar:setMenu(mic.buildMicMenu)` registers the function as a callback; Hammerspoon invokes it on each click, so the device list reflects current plug/unplug state of USB and Bluetooth devices.
 - **Scan cost ~0.5s.** ffmpeg is shelled out synchronously; the menu briefly hangs while it runs. Acceptable for an occasional click; if it becomes annoying, cache results for a few seconds.
-- **Persistence via `hs.settings`.** Selection is stored under the key `voice-dictate.audioDevice` in NSUserDefaults. Survives reloads and reboots without a config file.
-- **Passthrough to dictate.sh.** The main module reads `mic.loadAudioDevice()` at the start of every recording and passes it as `AUDIO_DEVICE=…` via `/usr/bin/env`, so changing mics takes effect on the next utterance.
+- **Persistence via `hs.settings`.** Selection is stored under the key `dikta.audioDevice` in NSUserDefaults. Survives reloads and reboots without a config file.
+- **Passthrough to dikta.sh.** The main module reads `mic.loadAudioDevice()` at the start of every recording and passes it as `AUDIO_DEVICE=…` via `/usr/bin/env`, so changing mics takes effect on the next utterance.
 
 ### Failure modes
 
 - **No audio devices found** → menu shows a disabled "no audio devices found" line. Recording falls back to `:0` and likely produces a zero-byte WAV → empty transcript → notify path.
-- **ffmpeg binary missing or moved** → scan returns empty; same handling as above. The path is resolved at install time by `install.sh` (via `command -v ffmpeg`) and written into `voice-dictate-config.lua` as `ffmpeg_path`; both this module and [voice-dictate-stream.lua](voice-dictate-stream.lua) read that key. If the Lua-side config predates the key, both modules fall back to probing `/opt/homebrew/bin/ffmpeg` and `/usr/local/bin/ffmpeg` and log a one-line warning suggesting a re-install.
+- **ffmpeg binary missing or moved** → scan returns empty; same handling as above. The path is resolved at install time by `install.sh` (via `command -v ffmpeg`) and written into `dikta-config.lua` as `ffmpeg_path`; both this module and [dikta-stream.lua](dikta-stream.lua) read that key. If the Lua-side config predates the key, both modules fall back to probing `/opt/homebrew/bin/ffmpeg` and `/usr/local/bin/ffmpeg` and log a one-line warning suggesting a re-install.
 
 ### Size budget
 
-CLAUDE.md's 200 soft / 300 hard line cap applies per file. The command-center extraction moved all menubar presentation out of the main module into [voice-dictate-menu.lua](voice-dictate-menu.lua), keeping each module under the cap. The opt-in streaming mode lives in its own sibling [voice-dictate-stream.lua](voice-dictate-stream.lua) for the same reason. Future split triggers: an on-pointer cursor loader or cursor-lock async paste would each justify another sibling.
+CLAUDE.md's 200 soft / 300 hard line cap applies per file. The command-center extraction moved all menubar presentation out of the main module into [dikta-menu.lua](dikta-menu.lua), keeping each module under the cap. The opt-in streaming mode lives in its own sibling [dikta-stream.lua](dikta-stream.lua) for the same reason. Future split triggers: an on-pointer cursor loader or cursor-lock async paste would each justify another sibling.
 
-## Streaming mode — voice-dictate-stream-mode.lua, voice-dictate-stream.lua, voice-dictate-splice.lua
+## Streaming mode — dikta-stream-mode.lua, dikta-stream.lua, dikta-splice.lua
 
 Three siblings cooperate to deliver the streaming pipeline that the PTT and toggle hotkeys both drive.
 
-- [voice-dictate-stream.lua](voice-dictate-stream.lua) — pipeline orchestrator. Spawns `bin/stream-server.sh start` (whisper-server daemon) and `bin/stream.sh record` (long-running ffmpeg) via `hs.task`, then runs an `hs.timer` every ~2s that finalises an ffmpeg snapshot of the in-progress session WAV, POSTs the snapshot to the daemon's `/inference` endpoint, parses the JSON, and dispatches the full transcript as a single emission. Knows nothing about pasting.
-- [voice-dictate-splice.lua](voice-dictate-splice.lua) — the splice paste layer. Owns the per-emission keystroke chain, the D3 divergence skip, the D4 clipboard snapshot/restore, and the D6 focus-loss subscription.
-- [voice-dictate-stream-mode.lua](voice-dictate-stream-mode.lua) — session orchestrator. On `startSession`, starts the splice session, registers `splice.applyEmission` as the stream's emission handler, and starts the pipeline. On `stopSession` (second hotkey tap, or focus loss), unwinds in reverse.
+- [dikta-stream.lua](dikta-stream.lua) — pipeline orchestrator. Spawns `bin/stream-server.sh start` (whisper-server daemon) and `bin/stream.sh record` (long-running ffmpeg) via `hs.task`, then runs an `hs.timer` every ~2s that finalises an ffmpeg snapshot of the in-progress session WAV, POSTs the snapshot to the daemon's `/inference` endpoint, parses the JSON, and dispatches the full transcript as a single emission. Knows nothing about pasting.
+- [dikta-splice.lua](dikta-splice.lua) — the splice paste layer. Owns the per-emission keystroke chain, the D3 divergence skip, the D4 clipboard snapshot/restore, and the D6 focus-loss subscription.
+- [dikta-stream-mode.lua](dikta-stream-mode.lua) — session orchestrator. On `startSession`, starts the splice session, registers `splice.applyEmission` as the stream's emission handler, and starts the pipeline. On `stopSession` (second hotkey tap, or focus loss), unwinds in reverse.
 
 ### State machine
 
@@ -163,7 +163,7 @@ Cursor lands at end-of-paste — equivalent to live-typing. Pre-existing content
 
 ### Configurable values
 
-The streaming-mode config keys are listed in the main "Configurable values" table for [voice-dictate.lua](voice-dictate.lua) above (`stream_sh`, `server_sh`). Both are optional — the Lua module falls back to repo-derived defaults when keys are absent, so older configs continue to load without an install rerun.
+The streaming-mode config keys are listed in the main "Configurable values" table for [dikta.lua](dikta.lua) above (`stream_sh`, `server_sh`). Both are optional — the Lua module falls back to repo-derived defaults when keys are absent, so older configs continue to load without an install rerun.
 
 ### Divergence-skip rule (D3)
 

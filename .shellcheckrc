@@ -1,4 +1,4 @@
-# shellcheck project config for voice-dictate.
+# shellcheck project config for Dikta.
 # Resolve `source` directives relative to each script's own directory so
 # `shellcheck -x <file>` works from any working directory, and follow the
 # sourced files when linting.

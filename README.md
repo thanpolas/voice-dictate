@@ -1,4 +1,4 @@
-# voice-dictate
+# Dikta
 
 > Local hotkey-driven speech-to-text dictation for macOS. Greek-first, English-capable, fully offline via [whisper.cpp][whisper-cpp] + [Hammerspoon][hammerspoon].
 
@@ -40,8 +40,8 @@ Other Whisper checkpoints work — set `MODEL_PATH` to your preferred file. See 
 # Install
 
 ```bash
-git clone https://github.com/thanpolas/voice-dictate.git
-cd voice-dictate
+git clone https://github.com/thanpolas/dikta.git
+cd dikta
 ./install.sh
 ```
 
@@ -61,7 +61,7 @@ Menubar shows `● LIVE` while streaming. System sounds play on start and stop.
 To verify the shell side independently:
 
 ```bash
-LANGUAGE=en ./bin/dictate.sh smoke
+LANGUAGE=en ./bin/dikta.sh smoke
 # → smoke: ok — And so, my fellow Americans, ...
 ```
 
@@ -71,8 +71,8 @@ If the smoke test passes but a hotkey doesn't paste, the issue is in Hammerspoon
 
 `./install.sh` writes two local config files on first run. The committed code ships with no user-specific defaults.
 
-- **`bin/config.local.sh`** — shell-side: `MODEL_PATH`, `LANGUAGE`, `THREADS`, `AUDIO_DEVICE`. Sourced by `dictate.sh` at run time. Per-invocation env overrides still work (e.g. `LANGUAGE=en ./bin/dictate.sh smoke`). Gitignored.
-- **`~/.hammerspoon/voice-dictate-config.lua`** — Hammerspoon-side: absolute paths to the shell scripts, toggle hotkey, PTT keycode. Loaded via `require` on every Hammerspoon reload.
+- **`bin/config.local.sh`** — shell-side: `MODEL_PATH`, `LANGUAGE`, `THREADS`, `AUDIO_DEVICE`. Sourced by `dikta.sh` at run time. Per-invocation env overrides still work (e.g. `LANGUAGE=en ./bin/dikta.sh smoke`). Gitignored.
+- **`~/.hammerspoon/dikta-config.lua`** — Hammerspoon-side: absolute paths to the shell scripts, toggle hotkey, PTT keycode. Loaded via `require` on every Hammerspoon reload.
 
 | Setting | File | Default |
 |---------|------|---------|
@@ -80,24 +80,24 @@ If the smoke test passes but a hotkey doesn't paste, the issue is in Hammerspoon
 | `LANGUAGE` | `bin/config.local.sh` | `el` (Greek; use `auto` for detection, `en` for English-only) |
 | `THREADS` | `bin/config.local.sh` | `8` |
 | `AUDIO_DEVICE` | `bin/config.local.sh` | `:0` (macOS default mic) |
-| `dictate_sh` | `~/.hammerspoon/voice-dictate-config.lua` | absolute path to `bin/dictate.sh` (derived at install) |
-| `stream_sh` | `~/.hammerspoon/voice-dictate-config.lua` | absolute path to `bin/stream.sh` (derived at install) |
-| `server_sh` | `~/.hammerspoon/voice-dictate-config.lua` | absolute path to `bin/stream-server.sh` (derived at install) |
-| `toggle_mods` + `toggle_key` | `~/.hammerspoon/voice-dictate-config.lua` | `Cmd+Shift+D` |
-| `right_alt_keycode` | `~/.hammerspoon/voice-dictate-config.lua` | `61` (Right Option; Left Option is `58`) |
+| `dikta_sh` | `~/.hammerspoon/dikta-config.lua` | absolute path to `bin/dikta.sh` (derived at install) |
+| `stream_sh` | `~/.hammerspoon/dikta-config.lua` | absolute path to `bin/stream.sh` (derived at install) |
+| `server_sh` | `~/.hammerspoon/dikta-config.lua` | absolute path to `bin/stream-server.sh` (derived at install) |
+| `toggle_mods` + `toggle_key` | `~/.hammerspoon/dikta-config.lua` | `Cmd+Shift+D` |
+| `right_alt_keycode` | `~/.hammerspoon/dikta-config.lua` | `61` (Right Option; Left Option is `58`) |
 
 The audio input device is picked at runtime via the menubar dropdown and persisted to `NSUserDefaults` (`hs.settings`); the `AUDIO_DEVICE` default above only applies when no device has been picked yet.
 
 Edit either file and re-trigger:
 
-- shell config: no reload needed; the next `dictate.sh` invocation picks it up.
+- shell config: no reload needed; the next `dikta.sh` invocation picks it up.
 - Hammerspoon config: run `hs.reload()` from the Console, or restart Hammerspoon.
 
 Re-running `./install.sh` is safe — prompts pre-fill with your current values.
 
 # Architecture
 
-Hammerspoon-driven streaming. The Lua module owns hotkeys, the state machine, the menubar item, and the clipboard-mediated paste; `bin/stream.sh` keeps a long-running `ffmpeg` AVFoundation capture writing to a session WAV, `bin/stream-server.sh` keeps `whisper-server` loaded on loopback, and the Lua side polls every ~2s with a finalised snapshot to dispatch each transcript as a paste. `bin/dictate.sh` is the original single-shot path and remains runnable from the shell. Full design and the boundary contract live in the [v0.1 spec][spec-md]; the streaming rebuild is in the [ffmpeg-streaming-rebuild plan][stream-rebuild-plan].
+Hammerspoon-driven streaming. The Lua module owns hotkeys, the state machine, the menubar item, and the clipboard-mediated paste; `bin/stream.sh` keeps a long-running `ffmpeg` AVFoundation capture writing to a session WAV, `bin/stream-server.sh` keeps `whisper-server` loaded on loopback, and the Lua side polls every ~2s with a finalised snapshot to dispatch each transcript as a paste. `bin/dikta.sh` is the original single-shot path and remains runnable from the shell. Full design and the boundary contract live in the [v0.1 spec][spec-md]; the streaming rebuild is in the [ffmpeg-streaming-rebuild plan][stream-rebuild-plan].
 
 # Engineering
 
@@ -119,8 +119,8 @@ Copyright © [Thanos Polychronakis][thanpolas] and Authors, [Licensed under ISC]
 [ffmpeg]: https://ffmpeg.org/
 [hammerspoon]: https://www.hammerspoon.org/
 [install-md]: INSTALL.md
-[dictate-sh]: bin/dictate.sh
-[lua-mod]: hammerspoon/voice-dictate.lua
+[dikta-sh]: bin/dikta.sh
+[lua-mod]: hammerspoon/dikta.lua
 [spec-md]: engineering/plans/2026-05-20-v0.1-spec.md
 [spec-transcription]: engineering/plans/2026-05-20-v0.1-spec.md#transcription
 [stream-plan]: engineering/plans/2026-05-26-streaming-transcription.md
