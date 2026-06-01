@@ -26,7 +26,7 @@ local DEFAULT_AUDIO_DEVICE = ":0"
 
 --- hs.settings key holding the user's last-selected avfoundation device index
 --- (e.g. ":2"). NSUserDefaults-backed — survives reloads and reboots.
-local SETTINGS_KEY_AUDIO_DEVICE = "voice-dictate.audioDevice"
+local SETTINGS_KEY_AUDIO_DEVICE = "dikta.audioDevice"
 
 --- Test whether a filesystem path is readable. Used by the ffmpeg-path
 --- fallback when cfg.ffmpeg_path is missing (older configs predating the
