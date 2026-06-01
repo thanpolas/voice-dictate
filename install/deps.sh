@@ -12,7 +12,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # Canonical URL for the official Homebrew installer; used by bootstrap_brew.
-readonly VD_BREW_INSTALL_URL="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
+readonly DK_BREW_INSTALL_URL="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
 
 # Check whether the brew command is available on PATH.
 # Returns 0 when Homebrew is present, 1 otherwise. Pure detection — no output,
@@ -26,13 +26,13 @@ function verify_brew() {
 # other dep flows through brew.
 function bootstrap_brew() {
   log warn "Homebrew is not installed."
-  echo "Homebrew is the package manager voice-dictate uses to install ffmpeg," >&2
+  echo "Homebrew is the package manager Dikta uses to install ffmpeg," >&2
   echo "whisper-cpp, and Hammerspoon. Installer source: https://brew.sh" >&2
   if ! confirm "Install Homebrew now?" y; then
     log error "Homebrew is required. Install it from https://brew.sh and re-run."
     exit 1
   fi
-  /bin/bash -c "$(curl -fsSL "${VD_BREW_INSTALL_URL}")"
+  /bin/bash -c "$(curl -fsSL "${DK_BREW_INSTALL_URL}")"
   if ! verify_brew; then
     log error "Homebrew installer ran but 'brew' is still not on PATH."
     log error "Open a new shell or follow the installer's post-install hint, then re-run."
@@ -53,7 +53,7 @@ function install_dep() {
   local description="${3}"
   log warn "${description} (${package}) is not installed."
   if ! confirm "Install ${package} via brew?" y; then
-    log warn "Skipped ${package}. voice-dictate may not work until it is installed."
+    log warn "Skipped ${package}. Dikta may not work until it is installed."
     return 0
   fi
   if [[ "${type}" == "cask" ]]; then

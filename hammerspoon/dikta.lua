@@ -92,14 +92,14 @@ end
 --- No-op if a session is already active.
 local function startSession()
   if streamMode.isActive() then
-    print("[vd-ptt] startSession: skip (already active)")
+    print("[dk-ptt] startSession: skip (already active)")
     return
   end
-  print("[vd-ptt] startSession: begin")
+  print("[dk-ptt] startSession: begin")
   streamMode.startSession(cfg)
   menu.setState("streaming")
   playStartCue()
-  print("[vd-ptt] startSession: end")
+  print("[dk-ptt] startSession: end")
 end
 
 --- Stop the active streaming session. The menubar flips to "finalizing"
@@ -111,17 +111,17 @@ end
 --- No-op if nothing is running.
 local function stopSession()
   if not streamMode.isActive() then
-    print("[vd-ptt] stopSession: skip (not active)")
+    print("[dk-ptt] stopSession: skip (not active)")
     return
   end
-  print("[vd-ptt] stopSession: begin")
+  print("[dk-ptt] stopSession: begin")
   menu.setState("finalizing")
   playStopCue()
   streamMode.stopSession(function()
     menu.setState("idle")
-    print("[vd-ptt] stopSession: finalized")
+    print("[dk-ptt] stopSession: finalized")
   end)
-  print("[vd-ptt] stopSession: end")
+  print("[dk-ptt] stopSession: end")
 end
 
 -- ───── input handlers ───────────────────────────────────────────────────────
@@ -207,7 +207,7 @@ function M.start()
     hideHsIcon = HIDE_HS_ICON,
   })
   bindHotkeys()
-  print("voice-dictate: ready (PTT = Right Option, Toggle = " ..
+  print("dikta: ready (PTT = Right Option, Toggle = " ..
     table.concat(TOGGLE_MODS, "+") .. "+" .. TOGGLE_KEY .. ")")
 end
 

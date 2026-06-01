@@ -40,9 +40,9 @@ function ts() {
   date '+%Y-%m-%d %H:%M:%S.%3N'
 }
 
-# Return ffmpeg-voice-dictate PIDs, one per line. Empty if none.
+# Return ffmpeg-dikta PIDs, one per line. Empty if none.
 function ghost_pids() {
-  pgrep -f 'ffmpeg.*voice-dictate' 2>/dev/null || true
+  pgrep -f 'ffmpeg.*dikta' 2>/dev/null || true
 }
 
 # Return the WAV path passed as the last arg to the given PID's command line.

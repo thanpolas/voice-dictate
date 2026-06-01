@@ -12,7 +12,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # Single line appended to init.lua; matched verbatim to keep patching idempotent.
-readonly VD_LOADER_LINE='require("dikta").start()'
+readonly DK_LOADER_LINE='require("dikta").start()'
 
 # Symlink every Dikta Lua module into ~/.hammerspoon/.
 # Force-overwrites prior symlinks so a repo move on disk fixes itself. All
@@ -38,12 +38,12 @@ function link_modules() {
 # $1 — absolute path to the user's ~/.hammerspoon/init.lua.
 function patch_init_lua() {
   local init_lua="${1}"
-  if [[ -f "${init_lua}" ]] && grep -Fq "${VD_LOADER_LINE}" "${init_lua}"; then
+  if [[ -f "${init_lua}" ]] && grep -Fq "${DK_LOADER_LINE}" "${init_lua}"; then
     log info "init.lua already requires Dikta — skipping patch"
     return 0
   fi
   printf '\n-- dikta (installed by dikta/install.sh)\n%s\n' \
-    "${VD_LOADER_LINE}" >> "${init_lua}"
+    "${DK_LOADER_LINE}" >> "${init_lua}"
   log ok "patched ${init_lua}"
 }
 

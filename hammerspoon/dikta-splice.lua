@@ -31,9 +31,9 @@ local PASTE_SETTLE_MS = 40
 local PASTEBOARD_RESTORE_DELAY_S = 0.4
 
 --- Console log prefix for this module's diagnostics, mirroring the sibling
---- [vd-stream] prefix. The splice layer previously emitted nothing, so a
+--- [dk-stream] prefix. The splice layer previously emitted nothing, so a
 --- failed paste cycle was invisible in the Hammerspoon Console.
-local LOG_PREFIX = "[vd-splice]"
+local LOG_PREFIX = "[dk-splice]"
 
 -- ───── module state ─────────────────────────────────────────────────────────
 

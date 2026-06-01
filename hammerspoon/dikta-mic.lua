@@ -50,7 +50,7 @@ local function resolveFfmpegPath(fromCfg)
   for _, p in ipairs({"/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"}) do
     if pathExists(p) then
       print(string.format(
-        "[vd-mic] ffmpeg_path not in config; falling back to %s — re-run ./install.sh to lock it in",
+        "[dk-mic] ffmpeg_path not in config; falling back to %s — re-run ./install.sh to lock it in",
         p))
       return p
     end

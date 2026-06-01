@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# @fileoverview voice-dictate streaming capture — continuous ffmpeg recording.
+# @fileoverview Dikta streaming capture — continuous ffmpeg recording.
 #
 # Subcommands:
 #   record <wav-path>  Capture mic to WAV until SIGTERM/SIGINT, same flags as
