@@ -11,7 +11,7 @@
 ---      parses the JSON, and dispatches the full transcript as a single
 ---      emission to the caller-registered handler.
 ---
---- The handler downstream is voice-dictate-splice.lua. Because each transcript
+--- The handler downstream is dikta-splice.lua. Because each transcript
 --- is the model's reading of the *entire* session WAV up to that tick, the
 --- splice's substring-replace mechanic naturally handles revisions: prior
 --- transcript is the anchor in the field, new transcript replaces it.
@@ -34,16 +34,16 @@ local M = {}
 --- which input ffmpeg should record from. Reading it at session start (not
 --- module load) means the menu pick takes effect on the next PTT without a
 --- Hammerspoon reload.
-local mic = require("voice-dictate-mic")
+local mic = require("dikta-mic")
 
 -- ───── constants ────────────────────────────────────────────────────────────
 
 --- Repo-derived path to bin/stream.sh (record) and bin/stream-server.sh
 --- (start/stop). The streaming-mode caller's cfg overrides these if set.
 local DEFAULT_STREAM_SH = os.getenv("HOME") ..
-  "/Projects/myStash/voice-dictate/bin/stream.sh"
+  "/Projects/myStash/dikta/bin/stream.sh"
 local DEFAULT_SERVER_SH = os.getenv("HOME") ..
-  "/Projects/myStash/voice-dictate/bin/stream-server.sh"
+  "/Projects/myStash/dikta/bin/stream-server.sh"
 
 --- HTTP endpoint the daemon serves. Port matches stream-server.sh's default.
 local SERVER_URL = "http://127.0.0.1:8472/inference"
@@ -99,7 +99,7 @@ local pendingOnDone = nil
 --- (install-time-resolved). Hammerspoon launches from launchd with a
 --- minimal PATH and cannot look up `ffmpeg` itself, and the Homebrew
 --- prefix differs between Apple Silicon and Intel — install.sh writes the
---- resolved absolute path into voice-dictate-config.lua. Falls back to
+--- resolved absolute path into dikta-config.lua. Falls back to
 --- the common Homebrew locations when cfg is silent (older configs).
 local ffmpegPath = nil
 
@@ -124,7 +124,7 @@ local function resolveFfmpegPath(fromCfg)
   for _, p in ipairs({"/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"}) do
     if pathExists(p) then
       print(string.format(
-        "[vd-stream] ffmpeg_path not in config; falling back to %s — re-run ./install.sh to lock it in",
+        "[dk-stream] ffmpeg_path not in config; falling back to %s — re-run ./install.sh to lock it in",
         p))
       return p
     end
@@ -141,29 +141,29 @@ local function postSnapshot()
     function(exit, stdout, _stderr)
       pollInFlight = false
       if exit ~= 0 then
-        print(string.format("[vd-stream] skip: curl exit=%d", exit))
+        print(string.format("[dk-stream] skip: curl exit=%d", exit))
         return
       end
       if stdout == nil or stdout == "" then
-        print("[vd-stream] skip: empty stdout")
+        print("[dk-stream] skip: empty stdout")
         return
       end
       local ok, parsed = pcall(hs.json.decode, stdout)
       if not ok or type(parsed) ~= "table" or type(parsed.text) ~= "string" then
-        print("[vd-stream] skip: bad json")
+        print("[dk-stream] skip: bad json")
         return
       end
       local text = parsed.text:gsub("^%s+", ""):gsub("%s+$", "")
       if text == "" then
-        print("[vd-stream] skip: empty text")
+        print("[dk-stream] skip: empty text")
         return
       end
       if text == lastDispatchedText then
-        print("[vd-stream] skip: dup")
+        print("[dk-stream] skip: dup")
         return
       end
       lastDispatchedText = text
-      print(string.format("[vd-stream] emit: %s", text))
+      print(string.format("[dk-stream] emit: %s", text))
       onEmission(text)
     end,
     {"-s", "-F", "file=@" .. SNAPSHOT_WAV, SERVER_URL})
@@ -185,11 +185,11 @@ end
 ---                            (success or failure), so the caller can finish
 ---                            tearing down state (e.g. splice.stopSession).
 local function finalizeAndEmit(onDone)
-  print("[vd-stream] finalize: begin")
+  print("[dk-stream] finalize: begin")
   hs.task.new(ffmpegPath,
     function(exit, _stdout, _stderr)
       if exit ~= 0 then
-        print(string.format("[vd-stream] finalize: snapshot exit=%d", exit))
+        print(string.format("[dk-stream] finalize: snapshot exit=%d", exit))
         os.remove(SNAPSHOT_WAV)
         if onDone then onDone() end
         return
@@ -197,22 +197,22 @@ local function finalizeAndEmit(onDone)
       hs.task.new(CURL_BIN,
         function(curlExit, stdout, _curlStderr)
           if curlExit ~= 0 then
-            print(string.format("[vd-stream] finalize: curl exit=%d", curlExit))
+            print(string.format("[dk-stream] finalize: curl exit=%d", curlExit))
           elseif stdout == nil or stdout == "" then
-            print("[vd-stream] finalize: empty stdout")
+            print("[dk-stream] finalize: empty stdout")
           else
             local ok, parsed = pcall(hs.json.decode, stdout)
             if not ok or type(parsed) ~= "table" or type(parsed.text) ~= "string" then
-              print("[vd-stream] finalize: bad json")
+              print("[dk-stream] finalize: bad json")
             else
               local text = parsed.text:gsub("^%s+", ""):gsub("%s+$", "")
               if text == "" then
-                print("[vd-stream] finalize: empty text")
+                print("[dk-stream] finalize: empty text")
               elseif text == lastDispatchedText then
-                print("[vd-stream] finalize: dup")
+                print("[dk-stream] finalize: dup")
               else
                 lastDispatchedText = text
-                print(string.format("[vd-stream] finalize emit: %s", text))
+                print(string.format("[dk-stream] finalize emit: %s", text))
                 onEmission(text)
               end
             end
@@ -231,14 +231,14 @@ end
 --- neither blocks the Hammerspoon main thread.
 local function snapshotAndPost()
   if pollInFlight then
-    print("[vd-stream] skip: poll in flight")
+    print("[dk-stream] skip: poll in flight")
     return
   end
   pollInFlight = true
   local task = hs.task.new(ffmpegPath,
     function(exit, _stdout, _stderr)
       if exit ~= 0 then
-        print(string.format("[vd-stream] skip: snapshot exit=%d", exit))
+        print(string.format("[dk-stream] skip: snapshot exit=%d", exit))
         pollInFlight = false
         return
       end
@@ -252,7 +252,7 @@ end
 -- ───── lifecycle ────────────────────────────────────────────────────────────
 
 --- Register the per-tick emission handler. Default is a no-op so the module
---- ships callable on its own; voice-dictate-stream-mode wires the splice.
+--- ships callable on its own; dikta-stream-mode wires the splice.
 function M.setEmissionHandler(fn)
   onEmission = fn or function(_line) end
 end
@@ -263,10 +263,10 @@ end
 --- @param cfg table Optional config; .stream_sh and .server_sh override paths.
 function M.start(cfg)
   if isStreaming then
-    print("[vd-stream] start: skip (already streaming)")
+    print("[dk-stream] start: skip (already streaming)")
     return false
   end
-  print("[vd-stream] start: begin")
+  print("[dk-stream] start: begin")
   local streamSh = (cfg and cfg.stream_sh) or DEFAULT_STREAM_SH
   local serverSh = (cfg and cfg.server_sh) or DEFAULT_SERVER_SH
   ffmpegPath = resolveFfmpegPath(cfg and cfg.ffmpeg_path)
@@ -276,14 +276,14 @@ function M.start(cfg)
   -- positional arg to stream.sh's `record` subcommand, which accepts
   -- `record <wav-path> [device]`.
   local audioDevice = mic.loadAudioDevice()
-  print(string.format("[vd-stream] start: audio_device=%s", audioDevice))
+  print(string.format("[dk-stream] start: audio_device=%s", audioDevice))
   os.remove(SESSION_WAV)
   lastDispatchedText = ""
   pollInFlight = false
   hs.task.new(serverSh, function(_exit, _stdout, _stderr) end, {"start"}):start()
   ffmpegTask = hs.task.new(streamSh,
     function(exit, _stdout, _stderr)
-      print(string.format("[vd-stream] ffmpeg exit=%d", exit))
+      print(string.format("[dk-stream] ffmpeg exit=%d", exit))
       -- ffmpeg only exits when M.stop() sent it SIGTERM (or it crashed). At
       -- this point the session WAV has its trailer flushed and is a valid
       -- input for inference. Always run one final transcription, even when
@@ -302,7 +302,7 @@ function M.start(cfg)
   ffmpegTask:start()
   pollTimer = hs.timer.doEvery(POLL_INTERVAL_S, snapshotAndPost)
   isStreaming = true
-  print("[vd-stream] start: end")
+  print("[dk-stream] start: end")
   return true
 end
 
@@ -321,7 +321,7 @@ end
 ---                            stop transcription (if any) has dispatched.
 ---                            If no ffmpeg task was active, fires inline.
 function M.stop(onDone)
-  print(string.format("[vd-stream] stop: begin isStreaming=%s", tostring(isStreaming)))
+  print(string.format("[dk-stream] stop: begin isStreaming=%s", tostring(isStreaming)))
   if pollTimer then pollTimer:stop(); pollTimer = nil end
   isStreaming = false
   if ffmpegTask then
@@ -334,7 +334,7 @@ function M.stop(onDone)
   elseif onDone then
     onDone()
   end
-  print("[vd-stream] stop: end")
+  print("[dk-stream] stop: end")
 end
 
 --- Query state.

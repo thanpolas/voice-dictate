@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# @fileoverview Automated test for dictate.sh record shutdown behavior.
+# @fileoverview Automated test for dikta.sh record shutdown behavior.
 #
 # Reproduces what Hammerspoon does when the user releases PTT:
-#   1. Spawn `dictate.sh record <wav> <device>` as a background process
+#   1. Spawn `dikta.sh record <wav> <device>` as a background process
 #   2. Sleep <hold_seconds> so ffmpeg captures some audio
-#   3. Send SIGTERM to dictate.sh's bash PID (same signal Hammerspoon sends)
+#   3. Send SIGTERM to dikta.sh's bash PID (same signal Hammerspoon sends)
 #   4. Measure how long until bash actually exits
 #   5. Verify ffmpeg flushed a complete WAV with the right header
 #   6. Confirm no orphan ffmpeg lingers
 #
 # Catches the bug we've been chasing — ghost ffmpegs that ignore SIGTERM and
 # zero-byte WAVs from premature kills — without needing Hammerspoon or real
-# keyboard input. Run after every change to dictate.sh.
+# keyboard input. Run after every change to dikta.sh.
 #
 # Usage:
 #   ./bin/test-record-shutdown.sh                  # all scenarios
@@ -24,9 +24,9 @@ set -euo pipefail
 
 # ───── config ───────────────────────────────────────────────────────────────
 
-# Absolute path to this repo's bin/dictate.sh.
+# Absolute path to this repo's bin/dikta.sh.
 readonly REPO_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly DICTATE_SH="${REPO_BIN}/dictate.sh"
+readonly DIKTA_SH="${REPO_BIN}/dikta.sh"
 
 # avfoundation index to record from. Overridable via env so the same suite
 # runs on different machines.
@@ -41,7 +41,7 @@ readonly MAX_SHUTDOWN_S=10
 # § Scratch paths). Cleaned up at end of each test case.
 readonly TMP_DIR="${REPO_BIN}/../tmp"
 mkdir -p "${TMP_DIR}"
-readonly TMP_PREFIX="${TMP_DIR}/vd-test-shutdown-$$"
+readonly TMP_PREFIX="${TMP_DIR}/dk-test-shutdown-$$"
 
 # ───── helpers ──────────────────────────────────────────────────────────────
 
@@ -131,8 +131,8 @@ function scenario_basic() {
   local wav="${TMP_PREFIX}-basic.wav"
   rm -f "${wav}" "${wav%.wav}.log"
 
-  say "spawn dictate.sh record (device=${AUDIO_DEVICE})"
-  "${DICTATE_SH}" record "${wav}" "${AUDIO_DEVICE}" &
+  say "spawn dikta.sh record (device=${AUDIO_DEVICE})"
+  "${DIKTA_SH}" record "${wav}" "${AUDIO_DEVICE}" &
   local bash_pid="${!}"
 
   say "bash pid=${bash_pid}; recording for 2s"
@@ -181,7 +181,7 @@ function scenario_rapid() {
   rm -f "${wav}" "${wav%.wav}.log"
 
   say "spawn + SIGTERM after 200ms"
-  "${DICTATE_SH}" record "${wav}" "${AUDIO_DEVICE}" &
+  "${DIKTA_SH}" record "${wav}" "${AUDIO_DEVICE}" &
   local bash_pid="${!}"
   sleep 0.2
   kill -TERM "${bash_pid}" 2>/dev/null || true
@@ -213,7 +213,7 @@ function scenario_no_orphan_accumulation() {
   for i in 1 2 3 4 5; do
     wav="${TMP_PREFIX}-loop-${i}.wav"
     rm -f "${wav}" "${wav%.wav}.log"
-    "${DICTATE_SH}" record "${wav}" "${AUDIO_DEVICE}" &
+    "${DIKTA_SH}" record "${wav}" "${AUDIO_DEVICE}" &
     bash_pid="${!}"
     sleep 0.5
     kill -TERM "${bash_pid}" 2>/dev/null || true
@@ -245,7 +245,7 @@ function scenario_wav_duration_preserved() {
   SCENARIO="wav-duration"
   local wav="${TMP_PREFIX}-dur.wav"
   rm -f "${wav}" "${wav%.wav}.log"
-  "${DICTATE_SH}" record "${wav}" "${AUDIO_DEVICE}" &
+  "${DIKTA_SH}" record "${wav}" "${AUDIO_DEVICE}" &
   local bash_pid="${!}"
   sleep 3
   kill -TERM "${bash_pid}" 2>/dev/null || true
@@ -282,7 +282,7 @@ function require_prereqs() {
   command -v pgrep   >/dev/null || { echo "missing: pgrep" >&2; missing=1; }
   command -v perl    >/dev/null || { echo "missing: perl" >&2; missing=1; }
   command -v bc      >/dev/null || { echo "missing: bc" >&2; missing=1; }
-  [[ -x "${DICTATE_SH}" ]] || { echo "missing: ${DICTATE_SH} (not executable)" >&2; missing=1; }
+  [[ -x "${DIKTA_SH}" ]] || { echo "missing: ${DIKTA_SH} (not executable)" >&2; missing=1; }
   if (( missing )); then exit 2; fi
 }
 

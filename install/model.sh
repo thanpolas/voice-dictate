@@ -12,10 +12,10 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # Default model file name used when downloading; matches the README/spec default.
-readonly VD_DEFAULT_MODEL_FILENAME="ggml-large-v3-turbo-q5_0.bin"
+readonly DK_DEFAULT_MODEL_FILENAME="ggml-large-v3-turbo-q5_0.bin"
 
 # Canonical download URL for the default model on Hugging Face.
-readonly VD_DEFAULT_MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${VD_DEFAULT_MODEL_FILENAME}"
+readonly DK_DEFAULT_MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${DK_DEFAULT_MODEL_FILENAME}"
 
 # Search known locations for an existing usable Whisper model.
 # Honours the configured path first, then scans ~/whisper-models/ for any
@@ -47,8 +47,8 @@ function find_existing_model() {
 function download_model() {
   local destination="${1}"
   mkdir -p "$(dirname "${destination}")"
-  log info "downloading ${VD_DEFAULT_MODEL_FILENAME} (~547 MB; resumable on retry)"
-  curl -L --fail -C - --progress-bar -o "${destination}" "${VD_DEFAULT_MODEL_URL}"
+  log info "downloading ${DK_DEFAULT_MODEL_FILENAME} (~547 MB; resumable on retry)"
+  curl -L --fail -C - --progress-bar -o "${destination}" "${DK_DEFAULT_MODEL_URL}"
   log ok "model saved to ${destination}"
 }
 
@@ -68,8 +68,8 @@ function ensure_model() {
     return 0
   fi
   log warn "no Whisper model found on disk."
-  echo "voice-dictate needs a Whisper model (~547 MB) to transcribe audio." >&2
-  echo "Default: ${VD_DEFAULT_MODEL_FILENAME} — Greek + English, ~5x realtime on M-series." >&2
+  echo "Dikta needs a Whisper model (~547 MB) to transcribe audio." >&2
+  echo "Default: ${DK_DEFAULT_MODEL_FILENAME} — Greek + English, ~5x realtime on M-series." >&2
   echo "Will be saved to: ${fallback_destination}" >&2
   if ! confirm "Download the default model now?" y; then
     log error "model is required. Provide one manually and re-run install.sh."

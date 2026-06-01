@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# @fileoverview voice-dictate streaming capture — continuous ffmpeg recording.
+# @fileoverview Dikta streaming capture — continuous ffmpeg recording.
 #
 # Subcommands:
 #   record <wav-path>  Capture mic to WAV until SIGTERM/SIGINT, same flags as
-#                      bin/dictate.sh record. Hammerspoon owns the WAV path
+#                      bin/dikta.sh record. Hammerspoon owns the WAV path
 #                      and signals shutdown when the session ends.
 #
-# Sibling of bin/dictate.sh, sharing its AVFoundation capture path so the same
+# Sibling of bin/dikta.sh, sharing its AVFoundation capture path so the same
 # Voice Processing IO unit (AGC, noise suppression, echo cancellation) runs
 # under both single-shot and streaming. Rationale and the prior whisper-stream
 # (SDL2) capture path that this replaced are in
@@ -47,7 +47,7 @@ readonly AUDIO_DEVICE
 
 # Record audio from the configured AVFoundation device to <wav-path> until
 # SIGTERM/SIGINT. Same bash-wrapper-forwards-SIGINT-to-ffmpeg dance as
-# dictate.sh's record subcommand — ffmpeg flushes the WAV trailer on SIGINT
+# dikta.sh's record subcommand — ffmpeg flushes the WAV trailer on SIGINT
 # and exits 0, so the file is always playable. Hammerspoon's hs.task is the
 # parent and signals via SIGTERM at session end.
 function record() {
@@ -55,7 +55,7 @@ function record() {
   local device="${2:-${AUDIO_DEVICE}}"
   local log="${wav%.wav}.log"
   echo "stream: record start wav=${wav} device=${device}" > "${log}"
-  # See bin/dictate.sh's record for the full rationale on the bash-wrapper
+  # See bin/dikta.sh's record for the full rationale on the bash-wrapper
   # SIGINT forwarding and the explicit </dev/null stdin redirect; this path
   # mirrors that contract so the same end-to-end shutdown tests cover it.
   ffmpeg -hide_banner -y \

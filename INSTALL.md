@@ -21,7 +21,7 @@ curl -L --progress-bar \
 ## Run the installer
 
 ```bash
-cd ~/Projects/myStash/voice-dictate
+cd ~/Projects/myStash/dikta
 ./install.sh
 ```
 
@@ -29,9 +29,9 @@ What it does, in order:
 
 1. Verifies `ffmpeg`, `whisper-cli`, and `/Applications/Hammerspoon.app`.
 2. Prompts for your Whisper model path and default language. Pre-fills from any existing `bin/config.local.sh` on re-runs.
-3. Writes `bin/config.local.sh` (gitignored) and `~/.hammerspoon/voice-dictate-config.lua` with the chosen values plus the technical defaults (threads, audio device, hotkey settings).
-4. Symlinks `hammerspoon/voice-dictate.lua` into `~/.hammerspoon/voice-dictate.lua`.
-5. Appends `require("voice-dictate").start()` to `~/.hammerspoon/init.lua` (idempotent — re-runs are safe).
+3. Writes `bin/config.local.sh` (gitignored) and `~/.hammerspoon/dikta-config.lua` with the chosen values plus the technical defaults (threads, audio device, hotkey settings).
+4. Symlinks `hammerspoon/dikta.lua` into `~/.hammerspoon/dikta.lua`.
+5. Appends `require("dikta").start()` to `~/.hammerspoon/init.lua` (idempotent — re-runs are safe).
 6. Triggers `hammerspoon://reload` to apply without restarting the app.
 
 ## Grant macOS permissions
@@ -51,7 +51,7 @@ If a hotkey fires but nothing happens, this is almost always the cause. Re-check
 Open the Hammerspoon Console (menubar icon → **Console**). After a clean reload you should see:
 
 ```
-voice-dictate: ready (PTT = Right Option, Toggle = Cmd+Shift+D)
+dikta: ready (PTT = Right Option, Toggle = Cmd+Shift+D)
 ```
 
 Pick your mic from the menubar: click the `○` item → the dropdown re-scans your avfoundation audio inputs and shows them by name. Select the one you want (a check appears next to it). The choice is remembered across reloads and reboots.
@@ -68,7 +68,7 @@ Menubar shows `● REC` while recording, `○` when idle. System sounds play on 
 If a hotkey path fails, isolate the shell side first:
 
 ```bash
-LANGUAGE=en ~/Projects/myStash/voice-dictate/bin/dictate.sh smoke
+LANGUAGE=en ~/Projects/myStash/dikta/bin/dikta.sh smoke
 # → smoke: ok — And so, my fellow Americans, ...
 ```
 
@@ -77,10 +77,10 @@ If `smoke` passes but the hotkey doesn't paste, the problem is in Hammerspoon (p
 ## Uninstall
 
 ```bash
-rm ~/.hammerspoon/voice-dictate.lua
-rm ~/.hammerspoon/voice-dictate-config.lua
+rm ~/.hammerspoon/dikta.lua
+rm ~/.hammerspoon/dikta-config.lua
 # then edit ~/.hammerspoon/init.lua and remove the line:
-#   require("voice-dictate").start()
+#   require("dikta").start()
 open -g hammerspoon://reload
 ```
 

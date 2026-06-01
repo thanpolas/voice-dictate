@@ -1,4 +1,4 @@
---- @fileoverview Menubar command center for voice-dictate (Dikta): the single
+--- @fileoverview Menubar command center for Dikta: the single
 --- menubar item, its dropdown, the idle icon (rendered in code via hs.canvas),
 --- and the streaming title.
 ---
@@ -22,7 +22,7 @@
 local M = {}
 
 --- Mic picker — scan / persist / menu. Embedded as the Microphone submenu.
-local mic = require("voice-dictate-mic")
+local mic = require("dikta-mic")
 
 -- ───── constants ──────────────────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# @fileoverview voice-dictate streaming inference daemon — whisper-server lifecycle.
+# @fileoverview Dikta streaming inference daemon — whisper-server lifecycle.
 #
 # Subcommands:
 #   start [port]   Spawn whisper-server on loopback with the configured model

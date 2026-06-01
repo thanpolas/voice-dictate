@@ -1,4 +1,4 @@
-# voice-dictate — Conventions
+# Dikta — Conventions
 
 Settled engineering rules for this repo. Nothing here is per-task negotiable. If a rule needs to change, change it here in the same session as the implementation that motivates the change.
 
@@ -54,11 +54,11 @@ Categories that always violate the rule when inline:
 - **Network endpoints** — URLs, hosts, ports.
 - **Settings keys and persistence labels** — `hs.settings` keys, `NSUserDefaults` labels.
 - **State and enum labels** — strings that represent a state (`"idle"`, `"streaming"`) or selector value.
-- **Repeat-use log prefixes** — `"[vd-stream]"` appearing across many `print` calls in the same file.
+- **Repeat-use log prefixes** — `"[dk-stream]"` appearing across many `print` calls in the same file.
 
 Where the value lives, by class:
 
-1. **Environment-dependent** — Homebrew prefix, model path, user's bin/ directory. The value comes from config. `install.sh` resolves it at install time and writes it into `bin/config.local.sh` (shell-side) or `~/.hammerspoon/voice-dictate-config.lua` (Lua-side); the runtime reads the config key. Hardcoded paths silently break across Apple Silicon / Intel / custom Homebrew prefixes.
+1. **Environment-dependent** — Homebrew prefix, model path, user's bin/ directory. The value comes from config. `install.sh` resolves it at install time and writes it into `bin/config.local.sh` (shell-side) or `~/.hammerspoon/dikta-config.lua` (Lua-side); the runtime reads the config key. Hardcoded paths silently break across Apple Silicon / Intel / custom Homebrew prefixes.
 2. **Environment-stable but still naming a thing** — `/usr/bin/curl` exists at the same path on every macOS, but it's still a name. It lives as a module-level `local NAME = "..."` constant in the constants block at the top of the file, with a one-line description above.
 3. **Code-internal labels** — state strings, settings keys, log prefixes. Same: module-level constants.
 
@@ -119,7 +119,7 @@ A document is a switchboard only if its body is **predominantly** a list of link
 
 ## Shell specifics
 
-- Shebang: `#!/usr/bin/env bash`. Not `sh` — voice-dictate uses bashisms (`[[ ]]`, `${var:-default}`, arrays).
+- Shebang: `#!/usr/bin/env bash`. Not `sh` — Dikta uses bashisms (`[[ ]]`, `${var:-default}`, arrays).
 - **`set -euo pipefail` is mandatory.** No `set +e` anywhere.
 - Constants declared at the top with the environment-variable override pattern: `: "${VAR:=default}"; readonly VAR`. Single-line `# description` above each.
 - Functions declared with the `function` keyword for searchability: `function name() { … }`.
@@ -168,9 +168,9 @@ Never stage, commit, or push without being explicitly told to. The user controls
 
 ## Bug fixes — failing test first (where possible)
 
-The testable surface in voice-dictate is `dictate.sh transcribe` plus any future pure helper. For bugs on that surface:
+The testable surface in Dikta is `dikta.sh transcribe` plus any future pure helper. For bugs on that surface:
 
-1. Add a `bin/test-*.sh` reproducer (or extend `dictate.sh smoke`) that demonstrates the bug.
+1. Add a `bin/test-*.sh` reproducer (or extend `dikta.sh smoke`) that demonstrates the bug.
 2. Confirm it fails against the current code.
 3. Implement the minimal fix.
 4. Confirm it passes.

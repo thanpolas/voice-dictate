@@ -9,13 +9,13 @@ set -euo pipefail
 # ANSI colour escapes used by log() to keep level prefixes scannable.
 # Defined as readonly so duplicate sourcing (when several helpers source
 # lib.sh in one orchestrator run) does not error on redeclaration.
-if [[ -z "${VD_LIB_COLORS_INITIALISED:-}" ]]; then
-  readonly VD_COLOR_RESET=$'\033[0m'
-  readonly VD_COLOR_INFO=$'\033[1;34m'
-  readonly VD_COLOR_WARN=$'\033[1;33m'
-  readonly VD_COLOR_ERROR=$'\033[1;31m'
-  readonly VD_COLOR_OK=$'\033[1;32m'
-  readonly VD_LIB_COLORS_INITIALISED=1
+if [[ -z "${DK_LIB_COLORS_INITIALISED:-}" ]]; then
+  readonly DK_COLOR_RESET=$'\033[0m'
+  readonly DK_COLOR_INFO=$'\033[1;34m'
+  readonly DK_COLOR_WARN=$'\033[1;33m'
+  readonly DK_COLOR_ERROR=$'\033[1;31m'
+  readonly DK_COLOR_OK=$'\033[1;32m'
+  readonly DK_LIB_COLORS_INITIALISED=1
 fi
 
 # Prompt the user with a free-form question and a default; echo the chosen value.
@@ -58,13 +58,13 @@ function log() {
   shift
   local color
   case "${level}" in
-    info)  color="${VD_COLOR_INFO}" ;;
-    warn)  color="${VD_COLOR_WARN}" ;;
-    error) color="${VD_COLOR_ERROR}" ;;
-    ok)    color="${VD_COLOR_OK}" ;;
-    *)     color="${VD_COLOR_RESET}" ;;
+    info)  color="${DK_COLOR_INFO}" ;;
+    warn)  color="${DK_COLOR_WARN}" ;;
+    error) color="${DK_COLOR_ERROR}" ;;
+    ok)    color="${DK_COLOR_OK}" ;;
+    *)     color="${DK_COLOR_RESET}" ;;
   esac
-  printf '%b[%s]%b %s\n' "${color}" "${level}" "${VD_COLOR_RESET}" "$*" >&2
+  printf '%b[%s]%b %s\n' "${color}" "${level}" "${DK_COLOR_RESET}" "$*" >&2
 }
 
 # Verify a required command is on PATH; abort with a helpful message if not.

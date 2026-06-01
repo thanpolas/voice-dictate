@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# @fileoverview Idempotent installer for voice-dictate. Thin orchestrator over
+# @fileoverview Idempotent installer for Dikta. Thin orchestrator over
 # the install/ helpers — verifies dependencies (prompting to install missing
 # ones via Homebrew), resolves a Whisper model (reusing one on disk or
 # downloading the default on consent), writes the two runtime config files,
@@ -17,27 +17,27 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPO_ROOT
 
 # Hammerspoon configuration directory in the user's home.
-readonly VD_HAMMERSPOON_DIR="${HOME}/.hammerspoon"
+readonly DK_HAMMERSPOON_DIR="${HOME}/.hammerspoon"
 
 # Source directory of Lua modules shipped by this repo; every *.lua here is
 # symlinked into the Hammerspoon dir, so new modules need no change here.
-readonly VD_SRC_LUA_DIR="${REPO_ROOT}/hammerspoon"
+readonly DK_SRC_LUA_DIR="${REPO_ROOT}/hammerspoon"
 
-# User's Hammerspoon entry point — patched to require the voice-dictate module.
-readonly VD_INIT_LUA="${VD_HAMMERSPOON_DIR}/init.lua"
+# User's Hammerspoon entry point — patched to require the Dikta module.
+readonly DK_INIT_LUA="${DK_HAMMERSPOON_DIR}/init.lua"
 
 # Runtime config files written by the installer; both required by the tool.
-readonly VD_SHELL_CONFIG="${REPO_ROOT}/bin/config.local.sh"
-readonly VD_LUA_CONFIG="${VD_HAMMERSPOON_DIR}/voice-dictate-config.lua"
+readonly DK_SHELL_CONFIG="${REPO_ROOT}/bin/config.local.sh"
+readonly DK_LUA_CONFIG="${DK_HAMMERSPOON_DIR}/dikta-config.lua"
 
 # Project-local artifact store; install.sh creates it on first run.
-readonly VD_LOCAL_MODELS_DIR="${REPO_ROOT}/.local/models"
+readonly DK_LOCAL_MODELS_DIR="${REPO_ROOT}/.local/models"
 
 # Default language for the Whisper transcription — Greek primary per spec.
-# VD_DEFAULT_MODEL_FILENAME is declared in install/model.sh and reaches us
+# DK_DEFAULT_MODEL_FILENAME is declared in install/model.sh and reaches us
 # via the source line below; declaring it here would double-readonly under
 # set -e and abort the script.
-readonly VD_DEFAULT_LANGUAGE="el"
+readonly DK_DEFAULT_LANGUAGE="el"
 
 # Source every helper so their public functions are in scope. lib.sh is
 # transitively sourced by each helper; its colour constants are reload-safe.
@@ -54,12 +54,12 @@ source "${REPO_ROOT}/install/hammerspoon.sh"
 # Echoes "model|language" so the orchestrator can split it; empty fields when
 # the config does not exist or does not set the value.
 function read_existing_config() {
-  if [[ ! -f "${VD_SHELL_CONFIG}" ]]; then
+  if [[ ! -f "${DK_SHELL_CONFIG}" ]]; then
     echo "|"
     return 0
   fi
   # shellcheck source=/dev/null
-  source "${VD_SHELL_CONFIG}"
+  source "${DK_SHELL_CONFIG}"
   echo "${MODEL_PATH:-}|${LANGUAGE:-}"
 }
 
@@ -80,7 +80,7 @@ function ensure_brew_dep_by_command() {
 # Run the full install flow. Idempotent — re-runs detect existing state and
 # skip work that is already done.
 function cmd_install() {
-  log info "voice-dictate installer starting"
+  log info "Dikta installer starting"
 
   if ! verify_brew; then
     bootstrap_brew
@@ -95,17 +95,17 @@ function cmd_install() {
   prior="$(read_existing_config)"
   model_default="${prior%|*}"
   language_default="${prior##*|}"
-  : "${model_default:=${VD_LOCAL_MODELS_DIR}/${VD_DEFAULT_MODEL_FILENAME}}"
-  : "${language_default:=${VD_DEFAULT_LANGUAGE}}"
+  : "${model_default:=${DK_LOCAL_MODELS_DIR}/${DK_DEFAULT_MODEL_FILENAME}}"
+  : "${language_default:=${DK_DEFAULT_LANGUAGE}}"
 
   echo
-  log info "voice-dictate config — press Enter to accept defaults"
+  log info "Dikta config — press Enter to accept defaults"
   local cfg_model cfg_language
   cfg_model="$(ask "Whisper model path" "${model_default}")"
   cfg_language="$(ask "Default language (el, en, auto, …)" "${language_default}")"
 
   local resolved_model
-  resolved_model="$(ensure_model "${cfg_model}" "${VD_LOCAL_MODELS_DIR}/${VD_DEFAULT_MODEL_FILENAME}")"
+  resolved_model="$(ensure_model "${cfg_model}" "${DK_LOCAL_MODELS_DIR}/${DK_DEFAULT_MODEL_FILENAME}")"
 
   # Resolve the ffmpeg binary now so the Lua config carries an absolute path.
   # Hammerspoon launches from launchd with a minimal PATH and cannot look up
@@ -119,14 +119,14 @@ function cmd_install() {
     exit 1
   fi
 
-  write_shell_config "${VD_SHELL_CONFIG}" "${resolved_model}" "${cfg_language}"
-  write_lua_config "${VD_LUA_CONFIG}" "${REPO_ROOT}/bin/dictate.sh" "${ffmpeg_path}"
-  link_modules "${VD_SRC_LUA_DIR}" "${VD_HAMMERSPOON_DIR}"
-  patch_init_lua "${VD_INIT_LUA}"
+  write_shell_config "${DK_SHELL_CONFIG}" "${resolved_model}" "${cfg_language}"
+  write_lua_config "${DK_LUA_CONFIG}" "${REPO_ROOT}/bin/dikta.sh" "${ffmpeg_path}"
+  link_modules "${DK_SRC_LUA_DIR}" "${DK_HAMMERSPOON_DIR}"
+  patch_init_lua "${DK_INIT_LUA}"
   reload_hammerspoon
 
   echo
-  log ok "voice-dictate installed. Hotkeys: Right Option (PTT), Cmd+Shift+D (toggle)"
+  log ok "Dikta installed. Hotkeys: Right Option (PTT), Cmd+Shift+D (toggle)"
   log info "macOS will prompt for Accessibility, Input Monitoring, and Microphone on first use — grant each when asked."
 }
 
