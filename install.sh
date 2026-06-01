@@ -120,7 +120,7 @@ function cmd_install() {
   fi
 
   write_shell_config "${VD_SHELL_CONFIG}" "${resolved_model}" "${cfg_language}"
-  write_lua_config "${VD_LUA_CONFIG}" "${REPO_ROOT}/bin/dictate.sh" "${ffmpeg_path}"
+  write_lua_config "${VD_LUA_CONFIG}" "${REPO_ROOT}/bin/dikta.sh" "${ffmpeg_path}"
   link_modules "${VD_SRC_LUA_DIR}" "${VD_HAMMERSPOON_DIR}"
   patch_init_lua "${VD_INIT_LUA}"
   reload_hammerspoon

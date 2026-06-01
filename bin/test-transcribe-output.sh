@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# @fileoverview Regression test: dictate.sh transcribe output must be free of
+# @fileoverview Regression test: dikta.sh transcribe output must be free of
 # ANSI escape sequences and other control characters, both directly and when
 # invoked the way Hammerspoon does (`/bin/bash -c "..."`, matching the
 # `hs.execute(cmd, false)` invocation).
@@ -20,7 +20,7 @@ set -euo pipefail
 # ───── config ───────────────────────────────────────────────────────────────
 
 readonly REPO_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly DICTATE_SH="${REPO_BIN}/dictate.sh"
+readonly DIKTA_SH="${REPO_BIN}/dikta.sh"
 readonly FIXTURE="/opt/homebrew/share/whisper-cpp/jfk.wav"
 
 # ───── helpers ──────────────────────────────────────────────────────────────
@@ -73,14 +73,14 @@ trap summary_and_exit EXIT
 
 # ───── scenarios ────────────────────────────────────────────────────────────
 
-# Invoke dictate.sh transcribe directly (same shell as the caller). Catches
-# any ANSI sequence leaking through dictate.sh's own pipeline (the perl
+# Invoke dikta.sh transcribe directly (same shell as the caller). Catches
+# any ANSI sequence leaking through dikta.sh's own pipeline (the perl
 # ANSI-strip step in transcribe()).
 function scenario_direct() {
   SCENARIO="direct"
-  say "running: LANGUAGE=en ${DICTATE_SH} transcribe ${FIXTURE}"
+  say "running: LANGUAGE=en ${DIKTA_SH} transcribe ${FIXTURE}"
   local out
-  out="$(LANGUAGE=en "${DICTATE_SH}" transcribe "${FIXTURE}")"
+  out="$(LANGUAGE=en "${DIKTA_SH}" transcribe "${FIXTURE}")"
   assert_no_esc "direct" "${out}" || return
   assert_no_other_controls "direct" "${out}" || return
 }
@@ -91,7 +91,7 @@ function scenario_via_bash_c() {
   SCENARIO="via-bash-c"
   say "running via /bin/bash -c (mimics hs.execute false)"
   local out
-  out="$(/bin/bash -c "LANGUAGE=en '${DICTATE_SH}' transcribe '${FIXTURE}'")"
+  out="$(/bin/bash -c "LANGUAGE=en '${DIKTA_SH}' transcribe '${FIXTURE}'")"
   assert_no_esc "via-bash-c" "${out}" || return
   assert_no_other_controls "via-bash-c" "${out}" || return
 }
@@ -103,7 +103,7 @@ function scenario_via_login_shell() {
   SCENARIO="via-login-shell"
   say "running via /bin/bash -l -c (mimics hs.execute true)"
   local out
-  out="$(/bin/bash -l -c "LANGUAGE=en '${DICTATE_SH}' transcribe '${FIXTURE}'")"
+  out="$(/bin/bash -l -c "LANGUAGE=en '${DIKTA_SH}' transcribe '${FIXTURE}'")"
   assert_no_esc "via-login-shell" "${out}" || return
   assert_no_other_controls "via-login-shell" "${out}" || return
 }
@@ -114,7 +114,7 @@ function scenario_via_login_shell() {
 function scenario_non_empty_useful() {
   SCENARIO="non-empty"
   local out
-  out="$(LANGUAGE=en "${DICTATE_SH}" transcribe "${FIXTURE}")"
+  out="$(LANGUAGE=en "${DIKTA_SH}" transcribe "${FIXTURE}")"
   if [[ -z "${out// /}" ]]; then
     fail "transcript is empty"
     return
@@ -132,7 +132,7 @@ function require_prereqs() {
   local missing=0
   command -v whisper-cli >/dev/null || { echo "missing: whisper-cli" >&2; missing=1; }
   command -v xxd >/dev/null         || { echo "missing: xxd" >&2; missing=1; }
-  [[ -x "${DICTATE_SH}" ]] || { echo "missing executable ${DICTATE_SH}" >&2; missing=1; }
+  [[ -x "${DIKTA_SH}" ]] || { echo "missing executable ${DIKTA_SH}" >&2; missing=1; }
   [[ -f "${FIXTURE}"    ]] || { echo "missing fixture ${FIXTURE}" >&2; missing=1; }
   if (( missing )); then exit 2; fi
 }
