@@ -38,12 +38,19 @@ local mic = require("dikta-mic")
 
 -- ───── constants ────────────────────────────────────────────────────────────
 
---- Repo-derived path to bin/stream.sh (record) and bin/stream-server.sh
---- (start/stop). The streaming-mode caller's cfg overrides these if set.
+--- Repo-derived fallback paths to bin/stream.sh (record) and
+--- bin/stream-server.sh (start/stop). install.sh writes the real,
+--- install-location paths into dikta-config.lua and the streaming-mode caller
+--- passes them via cfg.stream_sh / cfg.server_sh, which override these; the
+--- defaults only cover configs predating those keys. NOTE the directory is
+--- `dicta` — the repo checkout name — which is deliberately spelled
+--- differently from the product name "Dikta". Deriving any runtime path from
+--- the product spelling is the regression that broke recording; scratch paths
+--- are derived from the *runtime* stream.sh below, never from this constant.
 local DEFAULT_STREAM_SH = os.getenv("HOME") ..
-  "/Projects/myStash/dikta/bin/stream.sh"
+  "/Projects/myStash/dicta/bin/stream.sh"
 local DEFAULT_SERVER_SH = os.getenv("HOME") ..
-  "/Projects/myStash/dikta/bin/stream-server.sh"
+  "/Projects/myStash/dicta/bin/stream-server.sh"
 
 --- HTTP endpoint the daemon serves. Port matches stream-server.sh's default.
 local SERVER_URL = "http://127.0.0.1:8472/inference"
@@ -61,12 +68,13 @@ local KILL_BIN = "/bin/kill"
 --- on M-series with large-v3-turbo over a growing session WAV.
 local POLL_INTERVAL_S = 2.0
 
---- Repo-local scratch directory for the session WAV and the snapshot the
---- poller hands to the server. Project rule: never /tmp (see CLAUDE.md
---- § Scratch paths). Derived from DEFAULT_STREAM_SH by stripping /bin/<file>.
-local TMP_DIR = (DEFAULT_STREAM_SH:gsub("/bin/[^/]+$", "/tmp"))
-local SESSION_WAV = TMP_DIR .. "/stream-session.wav"
-local SNAPSHOT_WAV = TMP_DIR .. "/stream-snapshot.wav"
+--- Basenames of the two repo-local scratch WAVs: the continuous session
+--- capture and the per-tick snapshot the poller hands the server. The
+--- containing tmp/ directory is derived at session start from the *runtime*
+--- stream.sh path (see deriveScratchPaths / M.start) so it always tracks the
+--- real checkout location. Project rule: never /tmp (CLAUDE.md § Scratch paths).
+local SESSION_WAV_NAME = "stream-session.wav"
+local SNAPSHOT_WAV_NAME = "stream-snapshot.wav"
 
 -- ───── module state ─────────────────────────────────────────────────────────
 
@@ -102,6 +110,26 @@ local pendingOnDone = nil
 --- resolved absolute path into dikta-config.lua. Falls back to
 --- the common Homebrew locations when cfg is silent (older configs).
 local ffmpegPath = nil
+
+--- Absolute paths to the session WAV (continuous capture) and the per-tick
+--- snapshot the poller hands the server. Derived in M.start from the runtime
+--- stream.sh path so they live in the real checkout's tmp/ dir rather than a
+--- path baked in at module load. Nil until the first M.start.
+local sessionWav = nil
+local snapshotWav = nil
+
+--- Derive the repo-local scratch WAV paths from the runtime stream.sh path by
+--- stripping `/bin/<file>` to reach the repo root, then appending /tmp/<name>.
+--- Driven by the *resolved* stream.sh (cfg.stream_sh when set), not a
+--- module-load constant, so the scratch dir always tracks the real checkout
+--- location — the divergence that broke recording when the repo dir (`dicta`)
+--- and the product name (`Dikta`) were spelled differently.
+--- @param streamSh string Absolute path to bin/stream.sh for this session.
+local function deriveScratchPaths(streamSh)
+  local tmpDir = streamSh:gsub("/bin/[^/]+$", "/tmp")
+  sessionWav = tmpDir .. "/" .. SESSION_WAV_NAME
+  snapshotWav = tmpDir .. "/" .. SNAPSHOT_WAV_NAME
+end
 
 --- Test whether a filesystem path is readable. Used to probe the common
 --- ffmpeg locations when cfg.ffmpeg_path is missing.
@@ -166,7 +194,7 @@ local function postSnapshot()
       print(string.format("[dk-stream] emit: %s", text))
       onEmission(text)
     end,
-    {"-s", "-F", "file=@" .. SNAPSHOT_WAV, SERVER_URL})
+    {"-s", "-F", "file=@" .. snapshotWav, SERVER_URL})
   task:start()
 end
 
@@ -190,7 +218,7 @@ local function finalizeAndEmit(onDone)
     function(exit, _stdout, _stderr)
       if exit ~= 0 then
         print(string.format("[dk-stream] finalize: snapshot exit=%d", exit))
-        os.remove(SNAPSHOT_WAV)
+        os.remove(snapshotWav)
         if onDone then onDone() end
         return
       end
@@ -217,13 +245,13 @@ local function finalizeAndEmit(onDone)
               end
             end
           end
-          os.remove(SNAPSHOT_WAV)
+          os.remove(snapshotWav)
           if onDone then onDone() end
         end,
-        {"-s", "-F", "file=@" .. SNAPSHOT_WAV, SERVER_URL}):start()
+        {"-s", "-F", "file=@" .. snapshotWav, SERVER_URL}):start()
     end,
     {"-hide_banner", "-loglevel", "error", "-y",
-     "-i", SESSION_WAV, "-c", "copy", SNAPSHOT_WAV}):start()
+     "-i", sessionWav, "-c", "copy", snapshotWav}):start()
 end
 
 --- Finalise the in-progress session WAV into a snapshot the server can parse,
@@ -245,7 +273,7 @@ local function snapshotAndPost()
       postSnapshot()
     end,
     {"-hide_banner", "-loglevel", "error", "-y",
-     "-i", SESSION_WAV, "-c", "copy", SNAPSHOT_WAV})
+     "-i", sessionWav, "-c", "copy", snapshotWav})
   task:start()
 end
 
@@ -269,6 +297,9 @@ function M.start(cfg)
   print("[dk-stream] start: begin")
   local streamSh = (cfg and cfg.stream_sh) or DEFAULT_STREAM_SH
   local serverSh = (cfg and cfg.server_sh) or DEFAULT_SERVER_SH
+  -- Pin the scratch WAV paths to the *runtime* stream.sh location for this
+  -- session, so the recorder writes into the real checkout's tmp/ dir.
+  deriveScratchPaths(streamSh)
   ffmpegPath = resolveFfmpegPath(cfg and cfg.ffmpeg_path)
   -- The mic picker is the source of truth for which input ffmpeg records
   -- from. Read at session start (not module load) so menu changes take
@@ -277,7 +308,7 @@ function M.start(cfg)
   -- `record <wav-path> [device]`.
   local audioDevice = mic.loadAudioDevice()
   print(string.format("[dk-stream] start: audio_device=%s", audioDevice))
-  os.remove(SESSION_WAV)
+  os.remove(sessionWav)
   lastDispatchedText = ""
   pollInFlight = false
   hs.task.new(serverSh, function(_exit, _stdout, _stderr) end, {"start"}):start()
@@ -298,7 +329,7 @@ function M.start(cfg)
       pendingOnDone = nil
       finalizeAndEmit(cb)
     end,
-    {"record", SESSION_WAV, audioDevice})
+    {"record", sessionWav, audioDevice})
   ffmpegTask:start()
   pollTimer = hs.timer.doEvery(POLL_INTERVAL_S, snapshotAndPost)
   isStreaming = true
@@ -324,15 +355,26 @@ function M.stop(onDone)
   print(string.format("[dk-stream] stop: begin isStreaming=%s", tostring(isStreaming)))
   if pollTimer then pollTimer:stop(); pollTimer = nil end
   isStreaming = false
-  if ffmpegTask then
+  if ffmpegTask and ffmpegTask:isRunning() then
+    -- Recorder is live: stash onDone, SIGTERM ffmpeg, and let its exit
+    -- callback (set in M.start) run the post-stop transcription and then
+    -- fire onDone. This is the normal PTT-release path.
     pendingOnDone = onDone
     local pid = ffmpegTask:pid()
+    ffmpegTask = nil
     if pid and pid > 0 then
       hs.task.new(KILL_BIN, nil, {"-TERM", tostring(pid)}):start()
     end
+  else
+    -- No live recorder: either none started, or ffmpeg already exited (e.g.
+    -- it died on launch). Its one-shot exit callback has already fired and
+    -- will NOT fire again, so invoke onDone here directly. Without this the
+    -- caller's teardown (splice stop, menubar → idle) is stranded and the
+    -- finalize spinner spins forever — the exact symptom a missing scratch
+    -- dir produced before the path fix.
     ffmpegTask = nil
-  elseif onDone then
-    onDone()
+    pendingOnDone = nil
+    if onDone then onDone() end
   end
   print("[dk-stream] stop: end")
 end
