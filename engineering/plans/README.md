@@ -19,6 +19,8 @@ Naming: `YYYY-MM-DD-slug.md`. The date is the day the plan was opened, not when 
 - [2026-05-31-streaming-flush-cadence.md](2026-05-31-streaming-flush-cadence.md) — Make the streaming recorder flush incrementally so transcripts appear every ~2s instead of in 8s blocks.
 - [2026-06-01-splice-revision-anchor.md](2026-06-01-splice-revision-anchor.md) — Diagnose why only the first emission pastes: the splice anchor relies on Shift+Cmd+Up, which misbehaves in Claude Code / REPLs.
 - [2026-05-31-keypress-stop.md](2026-05-31-keypress-stop.md) — Add a fourth stop trigger: any ordinary keystroke ends an active streaming session, keeping the text already pasted.
+- [2026-06-03-scratch-path-rename-regression.md](2026-06-03-scratch-path-rename-regression.md) — Fix the rename regression: scratch WAV dir derived from a hardcoded `dikta` constant (vs the `dicta` checkout), killing recording and hanging the spinner.
+- [2026-06-03-stream-module-split.md](2026-06-03-stream-module-split.md) — Split the over-cap dikta-stream.lua into lifecycle + inference + a shared ffmpeg locator, with the public API and module name unchanged.
 - [2026-05-25-install-ux-bootstrap.md](2026-05-25-install-ux-bootstrap.md) — Install UX rethink: delete INSTALL.md, make install.sh a true bootstrapper, decide distribution path.
 - [2026-05-20-v0.1-spec.md](2026-05-20-v0.1-spec.md) — Locked v0.1 spec: scope, architecture, configuration surface, dependencies, open questions.
 - [2026-05-20-v0.1-implementation.md](2026-05-20-v0.1-implementation.md) — Original v0.1 implementation order: dictate.sh → Lua module → install.sh → READMEs → e2e.

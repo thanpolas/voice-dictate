@@ -39,7 +39,9 @@ Lua module loaded from the user's `~/.hammerspoon/init.lua`. Leaf README: [hamme
 - [hammerspoon/dikta.lua](hammerspoon/dikta.lua) — Hotkey handlers (PTT + toggle) driving streaming via dikta-stream-mode. Public API: `M.start()` / `M.stop()`.
 - [hammerspoon/dikta-menu.lua](hammerspoon/dikta-menu.lua) — Menubar command center: idle icon, dropdown, `● LIVE` streaming title; hides Hammerspoon's icon.
 - [hammerspoon/dikta-mic.lua](hammerspoon/dikta-mic.lua) — Mic picker: avfoundation device scan, Microphone submenu, NSUserDefaults persistence.
-- [hammerspoon/dikta-stream.lua](hammerspoon/dikta-stream.lua) — Streaming pipeline orchestrator: spawns bin/stream.sh + bin/stream-server.sh, polls every ~2s, POSTs WAV snapshots to /inference, dispatches each transcript to a registered handler.
+- [hammerspoon/dikta-stream.lua](hammerspoon/dikta-stream.lua) — Streaming pipeline lifecycle: spawns bin/stream.sh + bin/stream-server.sh, runs the ~2s poll timer, owns start/stop/state; drives dikta-stream-infer.
+- [hammerspoon/dikta-stream-infer.lua](hammerspoon/dikta-stream-infer.lua) — Per-tick transcription: finalises a WAV snapshot, POSTs it to /inference, parses JSON, dedups, dispatches each transcript to the registered handler.
+- [hammerspoon/dikta-ffmpeg.lua](hammerspoon/dikta-ffmpeg.lua) — ffmpeg-binary locator: cfg.ffmpeg_path wins, else probes the Homebrew prefixes. Shared by dikta-mic and the streaming pipeline.
 - [hammerspoon/dikta-splice.lua](hammerspoon/dikta-splice.lua) — Clipboard-mediated splice paste layer; owns D3 divergence skip, D4 clipboard preservation, D6 focus-loss stop.
 - [hammerspoon/dikta-stream-mode.lua](hammerspoon/dikta-stream-mode.lua) — Streaming session orchestrator; composes dikta-stream + dikta-splice into startSession/stopSession called from the main module's hotkeys.
 

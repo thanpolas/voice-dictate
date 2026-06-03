@@ -5,11 +5,13 @@ Lua files loaded via the user's `~/.hammerspoon/init.lua` (which requires the ma
 - [dikta.lua](dikta.lua) — main entry. Hotkeys, state machine, single-shot recording, paste.
 - [dikta-menu.lua](dikta-menu.lua) — menubar command center: the idle icon, the dropdown, the recording title, the spinner.
 - [dikta-mic.lua](dikta-mic.lua) — mic picker. Scans avfoundation inputs, persists choice via `hs.settings`, builds the Microphone submenu.
-- [dikta-stream.lua](dikta-stream.lua) — streaming pipeline orchestrator: spawns `bin/stream.sh` + `bin/stream-server.sh`, runs an `hs.timer` every ~2s to POST a WAV snapshot and dispatch the JSON transcript to the registered emission handler. Stateless splice-wise; pairs with dikta-splice.lua.
+- [dikta-stream.lua](dikta-stream.lua) — streaming pipeline lifecycle: spawns `bin/stream.sh` + `bin/stream-server.sh`, runs the ~2s `hs.timer`, owns start/stop/state. Drives dikta-stream-infer per tick; stateless splice-wise.
+- [dikta-stream-infer.lua](dikta-stream-infer.lua) — per-tick transcription mechanics: finalises a WAV snapshot, POSTs it to `/inference`, parses + dedups, dispatches each transcript to the registered emission handler. No timer, no recorder, no hotkeys.
+- [dikta-ffmpeg.lua](dikta-ffmpeg.lua) — ffmpeg-binary locator: `cfg.ffmpeg_path` wins, else probes the Homebrew prefixes. Shared by dikta-mic and the streaming pipeline so the probe order has one home.
 - [dikta-splice.lua](dikta-splice.lua) — clipboard-mediated splice paste layer. Per-emission `Shift+Cmd+Up` / `Cmd+X` / modify / `Cmd+V` with D3 divergence skip, D4 clipboard preservation, D6 focus-loss stop.
 - [dikta-stream-mode.lua](dikta-stream-mode.lua) — session orchestrator. Composes dikta-stream (pipeline) + dikta-splice (paste) into start/stop calls driven by the main module's hotkeys.
 
-All six files must live in `~/.hammerspoon/` so Lua's `require()` can resolve the siblings — `install.sh` symlinks every `hammerspoon/*.lua`.
+All eight files must live in `~/.hammerspoon/` so Lua's `require()` can resolve the siblings — `install.sh` symlinks every `hammerspoon/*.lua`.
 
 ## [dikta.lua](dikta.lua)
 
@@ -126,15 +128,16 @@ mic.buildMicMenu()     -- builds menu items for hs.menubar:setMenu(); rescans on
 
 ### Size budget
 
-CLAUDE.md's 200 soft / 300 hard line cap applies per file. The command-center extraction moved all menubar presentation out of the main module into [dikta-menu.lua](dikta-menu.lua), keeping each module under the cap. The opt-in streaming mode lives in its own sibling [dikta-stream.lua](dikta-stream.lua) for the same reason. Future split triggers: an on-pointer cursor loader or cursor-lock async paste would each justify another sibling.
+CLAUDE.md's 200 soft / 300 hard line cap applies per file. The command-center extraction moved all menubar presentation out of the main module into [dikta-menu.lua](dikta-menu.lua), keeping each module under the cap. The opt-in streaming mode lives in its own siblings for the same reason: when [dikta-stream.lua](dikta-stream.lua) crossed the hard cap it was split into lifecycle (dikta-stream.lua), inference mechanics ([dikta-stream-infer.lua](dikta-stream-infer.lua)), and the shared ffmpeg locator ([dikta-ffmpeg.lua](dikta-ffmpeg.lua)) — see [the split plan](../engineering/plans/2026-06-03-stream-module-split.md). Future split triggers: an on-pointer cursor loader or cursor-lock async paste would each justify another sibling.
 
-## Streaming mode — dikta-stream-mode.lua, dikta-stream.lua, dikta-splice.lua
+## Streaming mode — dikta-stream-mode.lua, dikta-stream.lua, dikta-stream-infer.lua, dikta-splice.lua
 
-Three siblings cooperate to deliver the streaming pipeline that the PTT and toggle hotkeys both drive.
+Four siblings cooperate to deliver the streaming pipeline that the PTT and toggle hotkeys both drive.
 
-- [dikta-stream.lua](dikta-stream.lua) — pipeline orchestrator. Spawns `bin/stream-server.sh start` (whisper-server daemon) and `bin/stream.sh record` (long-running ffmpeg) via `hs.task`, then runs an `hs.timer` every ~2s that finalises an ffmpeg snapshot of the in-progress session WAV, POSTs the snapshot to the daemon's `/inference` endpoint, parses the JSON, and dispatches the full transcript as a single emission. Knows nothing about pasting.
+- [dikta-stream.lua](dikta-stream.lua) — pipeline **lifecycle**. Spawns `bin/stream-server.sh start` (whisper-server daemon) and `bin/stream.sh record` (long-running ffmpeg) via `hs.task`, derives the scratch WAV paths from the runtime `stream.sh`, resolves ffmpeg via [dikta-ffmpeg.lua](dikta-ffmpeg.lua), configures the infer module, and runs the ~2s `hs.timer` that calls `infer.pollOnce()`. Owns `start`/`stop`/`isStreaming` and the recorder exit callback (which runs the final pass). Knows nothing about the HTTP/JSON mechanics or pasting.
+- [dikta-stream-infer.lua](dikta-stream-infer.lua) — the **inference cycle**. Configured per session with the ffmpeg path + the two scratch WAV paths. `pollOnce()` finalises an ffmpeg snapshot of the in-progress session WAV, POSTs it to the daemon's `/inference` endpoint, parses the JSON, applies the dedup + in-flight guards, and dispatches the full transcript as a single emission. `finalize(onDone)` is the post-stop pass against the flushed WAV. Knows nothing about timers, the recorder process, or hotkeys.
 - [dikta-splice.lua](dikta-splice.lua) — the splice paste layer. Owns the per-emission keystroke chain, the D3 divergence skip, the D4 clipboard snapshot/restore, and the D6 focus-loss subscription.
-- [dikta-stream-mode.lua](dikta-stream-mode.lua) — session orchestrator. On `startSession`, starts the splice session, registers `splice.applyEmission` as the stream's emission handler, and starts the pipeline. On `stopSession` (second hotkey tap, or focus loss), unwinds in reverse.
+- [dikta-stream-mode.lua](dikta-stream-mode.lua) — session orchestrator. On `startSession`, starts the splice session, registers `splice.applyEmission` as the stream's emission handler (delegated to infer), and starts the pipeline. On `stopSession` (second hotkey tap, or focus loss), unwinds in reverse.
 
 ### State machine
 
